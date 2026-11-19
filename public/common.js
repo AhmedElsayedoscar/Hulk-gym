@@ -103,6 +103,26 @@ function fmtDayArabic(dayStr) {
   return d.toLocaleDateString('ar-EG', { timeZone: 'UTC', weekday: 'short', year: 'numeric', month: 'numeric', day: 'numeric' });
 }
 
+function backBtn(fallback = '#/', text = 'رجوع') {
+  return h(
+    'button',
+    {
+      class: 'btn-back',
+      type: 'button',
+      title: 'الرجوع للخلف',
+      onclick: () => {
+        if (window.history.length > 1) {
+          window.history.back();
+        } else {
+          location.hash = fallback;
+        }
+      },
+    },
+    h('span', { class: 'back-arrow' }, '→'),
+    h('span', null, text)
+  );
+}
+
 function badge(state, text) {
   return h('span', { class: `badge ${state}` }, text || STATE_LABEL[state] || state);
 }

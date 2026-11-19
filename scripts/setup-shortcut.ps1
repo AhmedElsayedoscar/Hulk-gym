@@ -30,20 +30,30 @@ $sc.TargetPath = "wscript.exe"
 $sc.Arguments = "`"$targetVbs`""
 $sc.WorkingDirectory = $projectDir
 $sc.IconLocation = "$env:SystemRoot\System32\shell32.dll,43"
-$sc.Description = "Gym Management System"
+$sc.Description = "X GYM — نظام إدارة الجيم وتسجيل الحضور"
 $sc.Save()
 
+# 1. نسخ الاختصار إلى سطح المكتب
 $destLnk = Join-Path $desk "Gym-System.lnk"
 Copy-Item $localLnk -Destination $destLnk -Force
+
+# 2. نسخ الاختصار إلى بدء التشغيل التلقائي للويندوز (Startup)
+$startupFolder = [Environment]::GetFolderPath('Startup')
+if (Test-Path $startupFolder) {
+    $startupLnk = Join-Path $startupFolder "Gym-System.lnk"
+    Copy-Item $localLnk -Destination $startupLnk -Force
+}
+
 Remove-Item $localLnk -Force -ErrorAction SilentlyContinue
 
 if (Test-Path $destLnk) {
     Write-Host "==========================================================" -ForegroundColor Green
-    Write-Host " SUCCESS: Gym-System desktop shortcut created successfully!" -ForegroundColor Green
-    Write-Host " You can now double click Gym-System on your Desktop." -ForegroundColor Cyan
+    Write-Host " SUCCESS: Gym-System setup completed successfully!" -ForegroundColor Green
+    Write-Host " 1. Desktop shortcut created: Gym-System on your Desktop." -ForegroundColor Cyan
+    Write-Host " 2. Windows Startup enabled: System will start on PC boot." -ForegroundColor Cyan
     Write-Host "==========================================================" -ForegroundColor Green
     try {
-        (New-Object -ComObject WScript.Shell).Popup("Gym System is ready!`nShortcut created on your Desktop.", 5, "Gym System", 64)
+        (New-Object -ComObject WScript.Shell).Popup("تم تجهيز نظام الجيم بنجاح!`n`n1. تم إنشاء اختصار (Gym-System) على سطح المكتب.`n2. تم تفعيل التشغيل التلقائي عند فتح الكمبيوتر.", 6, "X GYM System", 64)
     } catch {}
     exit 0
 } else {

@@ -319,7 +319,7 @@ function cleanStr(v, max, field, required = false) {
 }
 
 function doCheckin(rawCode) {
-  const code = String(rawCode || '').trim().toUpperCase();
+  const code = toEnglishDigits(String(rawCode || '')).trim().toUpperCase();
   if (!code || code.length > 40) return { ok: false, reason: 'not_found', message: 'كود غير معروف' };
   const m = db.prepare('SELECT * FROM members WHERE code = ?').get(code);
   if (!m) return { ok: false, reason: 'not_found', message: 'كود غير معروف' };
@@ -524,7 +524,7 @@ route('GET', '/api/members', 'staff', (ctx) => {
 
 route('POST', '/api/members', 'staff', (ctx) => {
   const name = cleanStr(ctx.body.name, 100, 'الاسم', true);
-  const phone = cleanStr(ctx.body.phone, 30, 'رقم الموبايل');
+  const phone = toEnglishDigits(cleanStr(ctx.body.phone, 30, 'رقم الموبايل'));
   const notes = cleanStr(ctx.body.notes, 500, 'الملاحظات');
   const planId = ctx.body.plan_id ? intParam(ctx.body.plan_id) : null;
   if (planId && !db.prepare('SELECT 1 FROM plans WHERE id = ? AND active = 1').get(planId)) {
@@ -573,7 +573,7 @@ route('PUT', '/api/members/:id', 'staff', (ctx) => {
   const m = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
   if (!m) throw new ApiError(404, 'العضو غير موجود');
   const name = cleanStr(ctx.body.name ?? m.name, 100, 'الاسم', true);
-  const phone = cleanStr(ctx.body.phone ?? m.phone, 30, 'رقم الموبايل');
+  const phone = toEnglishDigits(cleanStr(ctx.body.phone ?? m.phone, 30, 'رقم الموبايل'));
   const notes = cleanStr(ctx.body.notes ?? m.notes, 500, 'الملاحظات');
   const active = ctx.body.active === undefined ? m.active : ctx.body.active ? 1 : 0;
   let code = m.code;
@@ -1039,18 +1039,31 @@ function getSecondaryBackupDir() {
   const customPath = getSetting('backup_external_dir', '').trim();
   if (customPath && fs.existsSync(customPath)) return customPath;
 
-  const candidateDrives = ['F:\\', 'D:\\', 'E:\\', 'A:\\', 'N:\\'];
-  for (const drv of candidateDrives) {
+  const currentRoot = path.parse(path.resolve(DATA_DIR)).root.toUpperCase();
+
+  // 1. فحص هل توجد فلاشة USB أو درايف خارجي يحتوي بالفعل على مجلد gym-backups
+  for (let code = 68; code <= 90; code++) { // من D إلى Z
+    const drv = String.fromCharCode(code) + ':\\';
+    if (drv === currentRoot) continue;
+    try {
+      const existing = path.join(drv, 'gym-backups');
+      if (fs.existsSync(existing)) return existing;
+    } catch {}
+  }
+
+  // 2. إذا لم يكن المجلد موجوداً، نبحث عن أول فلاشة USB أو بارتشن متاح وننشئ المجلد عليه تلقائياً
+  for (let code = 68; code <= 90; code++) { // من D إلى Z
+    const drv = String.fromCharCode(code) + ':\\';
+    if (drv === currentRoot) continue;
     try {
       if (fs.existsSync(drv)) {
         const secPath = path.join(drv, 'gym-backups');
         fs.mkdirSync(secPath, { recursive: true });
         return secPath;
       }
-    } catch {
-      /* ignore */
-    }
+    } catch {}
   }
+
   return null;
 }
 

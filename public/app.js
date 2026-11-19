@@ -209,7 +209,12 @@ async function pageMembers(query) {
     h(
       'div',
       { class: 'page-head' },
-      h('h1', null, 'الأعضاء'),
+      h(
+        'div',
+        { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
+        backBtn('#/', 'الرئيسية'),
+        h('h1', { style: 'margin:0;' }, 'الأعضاء')
+      ),
       h(
         'div',
         { style: 'display:flex;gap:8px;flex-wrap:wrap;' },
@@ -336,7 +341,16 @@ async function pageMember(id) {
   );
 
   app.replaceChildren(
-    h('div', { class: 'page-head' }, h('a', { href: '#/members' }, '← كل الأعضاء')),
+    h(
+      'div',
+      { class: 'page-head' },
+      h(
+        'div',
+        { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
+        backBtn('#/members', 'رجوع للأعضاء'),
+        h('h1', { style: 'margin:0;' }, m.name)
+      )
+    ),
     h(
       'div',
       { class: 'card' },
@@ -859,7 +873,12 @@ async function pageAttendance() {
     h(
       'div',
       { class: 'page-head' },
-      h('h1', null, 'سجل الحضور'),
+      h(
+        'div',
+        { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
+        backBtn('#/', 'الرئيسية'),
+        h('h1', { style: 'margin:0;' }, 'سجل الحضور')
+      ),
       h('button', { class: 'btn primary', onclick: () => manualAttendanceModal(load) }, '+ تسجيل حضور يدوي')
     ),
     presetContainer,
@@ -1207,7 +1226,12 @@ async function pageDailyReport(query) {
       h(
         'div',
         null,
-        h('h1', { style: 'display:flex;align-items:center;gap:10px' }, '📊 التقرير اليومي للوردية'),
+        h(
+          'div',
+          { style: 'display:flex;align-items:center;gap:12px;margin-bottom:4px;flex-wrap:wrap;' },
+          backBtn('#/', 'الرئيسية'),
+          h('h1', { style: 'display:flex;align-items:center;gap:10px;margin:0;' }, '📊 التقرير اليومي للوردية')
+        ),
         h('div', { class: 'muted', style: 'font-size:0.95rem;margin-top:2px' }, 'متابعة كافة الاشتراكات والتجديدات اليومية ومطابقة إيراد الخزينة')
       ),
       h(
@@ -1266,7 +1290,17 @@ async function pagePlans() {
   }
   const plans = await api('GET', '/api/plans?all=1');
   app.replaceChildren(
-    h('div', { class: 'page-head' }, h('h1', null, 'الباقات'), h('button', { class: 'btn primary', onclick: () => planModal(null) }, '+ باقة جديدة')),
+    h(
+      'div',
+      { class: 'page-head' },
+      h(
+        'div',
+        { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
+        backBtn('#/', 'الرئيسية'),
+        h('h1', { style: 'margin:0;' }, 'الباقات')
+      ),
+      h('button', { class: 'btn primary', onclick: () => planModal(null) }, '+ باقة جديدة')
+    ),
     h(
       'div',
       { class: 'card table-wrap' },
@@ -1462,7 +1496,12 @@ async function pageReminders() {
 
   app.replaceChildren(
     h('div', { class: 'page-head' },
-      h('h1', null, '🔔 إشعارات تجديد الاشتراكات')
+      h(
+        'div',
+        { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
+        backBtn('#/', 'الرئيسية'),
+        h('h1', { style: 'margin:0;' }, '🔔 إشعارات تجديد الاشتراكات')
+      )
     ),
     h('div', { class: 'alert warn', style: 'margin-bottom:14px' },
       `📋 قائمة الأعضاء الذين اشتراكاتهم ستنتهي خلال ${data.daysAhead} يوم أو انتهت مؤخراً (${data.list.length} عضو)`
@@ -1830,7 +1869,12 @@ async function pageSettings() {
 
   app.replaceChildren(
     h('div', { class: 'page-head' },
-      h('h1', null, '⚙️ الإعدادات وحماية البيانات')
+      h(
+        'div',
+        { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
+        backBtn('#/', 'الرئيسية'),
+        h('h1', { style: 'margin:0;' }, '⚙️ الإعدادات وحماية البيانات')
+      )
     ),
     backupCard,
     adminCard,

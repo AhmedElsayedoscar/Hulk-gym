@@ -188,6 +188,50 @@ td.wrap { white-space: normal; }
 .badge.cancelled { background: rgba(255, 255, 255, 0.08); color: #94a3b8; }
 
 /* ---------- أزرار ونماذج (Buttons & Forms) ---------- */
+/* زر الرجوع للخلف الاحترافي */
+.btn-back {
+  appearance: none;
+  border: 1px solid rgba(229, 169, 60, 0.35);
+  background: rgba(22, 26, 38, 0.9);
+  color: #ffd778;
+  padding: 6px 14px;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  user-select: none;
+  line-height: 1.2;
+}
+.btn-back:hover {
+  background: rgba(229, 169, 60, 0.18);
+  border-color: #ffd778;
+  color: #ffffff;
+  transform: translateX(3px);
+  box-shadow: 0 0 12px rgba(229, 169, 60, 0.3);
+  text-decoration: none;
+}
+.btn-back:active {
+  transform: scale(0.97);
+}
+.btn-back .back-arrow {
+  display: inline-block;
+  font-size: 1.15rem;
+  font-weight: 900;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+.btn-back:hover .back-arrow {
+  transform: translateX(3px);
+}
+
 .btn {
   appearance: none;
   border: 1px solid rgba(229, 169, 60, 0.3);
