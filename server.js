@@ -1248,7 +1248,7 @@ route('POST', '/api/backup/restore', 'admin', (ctx) => {
 
 
 // ---------- ميزة تجميد الاشتراك (Freeze Subscription) ----------
-route('POST', '/api/members/:id/freeze', 'staff', (ctx) => {
+route('POST', '/api/members/:id/freeze', 'admin', (ctx) => {
   const id = intParam(ctx.params.id);
   const m = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
   if (!m) throw new ApiError(404, 'العضو غير موجود');

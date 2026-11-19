@@ -314,7 +314,7 @@ async function pageMember(id) {
     'div',
     { class: 'actions', style: 'margin-top:12px' },
     h('button', { class: 'btn primary', onclick: () => renewModal(m, refresh) }, 'تجديد / اشتراك جديد'),
-    m.active && (m.sub.state === 'active' || m.sub.state === 'expiring')
+    ME.role === 'admin' && m.active && (m.sub.state === 'active' || m.sub.state === 'expiring')
       ? h('button', { class: 'btn', style: 'border-color:rgba(59,130,246,0.6);color:#93c5fd;font-weight:bold;', onclick: () => freezeModal(m, refresh) }, '❄️ تجميد الاشتراك')
       : null,
     h('button', { class: 'btn', onclick: () => editMemberModal(m, refresh) }, 'تعديل البيانات'),
@@ -464,7 +464,7 @@ function openWhatsAppModal(m) {
  نوع الباقة: ${planInfo}
  تاريخ انتهاء الاشتراك: ${endDate}
 
-🪪 مرفق صورة كارت العضوية والبار كود الخاص بك للدخول 
+ مرفق صورة كارت العضوية والبار كود الخاص بك للدخول 
 (يرجى حفظ صورة الكارت على هاتفك، وإبراز البار كود عند مكتب الاستقبال لتسجيل حضورك في كل تمرين)
 `;
 
