@@ -77,6 +77,39 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS employees (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  role        TEXT NOT NULL DEFAULT 'استقبال',
+  phone       TEXT NOT NULL DEFAULT '',
+  salary      REAL NOT NULL DEFAULT 0,
+  start_date  TEXT NOT NULL DEFAULT '',
+  notes       TEXT NOT NULL DEFAULT '',
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_emp_active ON employees(active);
+
+CREATE TABLE IF NOT EXISTS private_trainings (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_id         INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  trainer_id        INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  trainer_name      TEXT NOT NULL,
+  package_name      TEXT NOT NULL DEFAULT 'شهر تدريب خاص (برايفت)',
+  duration_days     INTEGER NOT NULL DEFAULT 30,
+  start_date        TEXT NOT NULL,
+  end_date          TEXT NOT NULL DEFAULT '',
+  total_sessions    INTEGER DEFAULT 0,
+  attended_sessions INTEGER DEFAULT 0,
+  price             REAL NOT NULL DEFAULT 0,
+  paid              REAL NOT NULL DEFAULT 0,
+  notes             TEXT NOT NULL DEFAULT '',
+  status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','cancelled','expired')),
+  created_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pt_member ON private_trainings(member_id, status, end_date);
+CREATE INDEX IF NOT EXISTS idx_pt_status ON private_trainings(status);
 `);
 
 // إعدادات التنبيهات الافتراضية

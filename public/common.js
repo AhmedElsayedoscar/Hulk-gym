@@ -123,6 +123,15 @@ function backBtn(fallback = '#/', text = 'رجوع') {
   );
 }
 
+function tile(cls, num, lbl, href) {
+  return h(
+    href ? 'a' : 'div',
+    { class: `tile ${cls}`, href, style: href ? 'color:inherit;text-decoration:none' : null },
+    h('div', { class: 'num' }, num),
+    h('div', { class: 'lbl' }, lbl)
+  );
+}
+
 function badge(state, text) {
   return h('span', { class: `badge ${state}` }, text || STATE_LABEL[state] || state);
 }

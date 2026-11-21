@@ -199,13 +199,13 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 function checkLoginAllowed(ip) {
-  checkRateLimit(`login:${ip}`, 5, 10 * 60 * 1000, 'محاولات دخول خاطئة متكررة. يرجى الانتظار 10 دقائق والمحاولة مجدداً');
+  checkRateLimit(`login:${ip}`, 5, 5 * 60 * 1000, 'محاولات دخول خاطئة متكررة. يرجى الانتظار 5 دقائق والمحاولة مجدداً');
 }
 
 function recordFailure(ip) {
   const r = rateLimits.get(`login:${ip}`);
   if (!r || r.resetAt <= Date.now()) {
-    rateLimits.set(`login:${ip}`, { count: 1, resetAt: Date.now() + 10 * 60 * 1000 });
+    rateLimits.set(`login:${ip}`, { count: 1, resetAt: Date.now() + 5 * 60 * 1000 });
   } else {
     r.count++;
   }
@@ -503,6 +503,64 @@ route('PUT', '/api/plans/:id', 'admin', (ctx) => {
   return { ok: true };
 });
 
+// ---------- الموظفين والمرتبات (Admin فقط) ----------
+route('GET', '/api/employees', 'admin', (ctx) => {
+  const all = db.prepare('SELECT * FROM employees ORDER BY active DESC, id DESC').all();
+  const totalSalary = all.filter((e) => e.active).reduce((sum, e) => sum + (Number(e.salary) || 0), 0);
+  const activeCount = all.filter((e) => e.active).length;
+  return { employees: all, totalSalary, activeCount, totalCount: all.length };
+});
+
+route('POST', '/api/employees', 'admin', (ctx) => {
+  const name = cleanStr(ctx.body.name, 100, 'اسم الموظف', true);
+  const role = cleanStr(ctx.body.role, 60, 'المسمى الوظيفي') || 'موظف';
+  const phone = toEnglishDigits(cleanStr(ctx.body.phone, 30, 'الهاتف'));
+  const salary = Number(toEnglishDigits(ctx.body.salary ?? 0));
+  const startDate = cleanStr(ctx.body.start_date, 20, 'تاريخ التعيين') || todayStr();
+  const notes = cleanStr(ctx.body.notes, 500, 'الملاحظات');
+  if (!Number.isFinite(salary) || salary < 0) throw new ApiError(400, 'المرتب غير صحيح');
+
+  const r = db.prepare(
+    'INSERT INTO employees (name, role, phone, salary, start_date, notes, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
+  ).run(name, role, phone, salary, startDate, notes, new Date().toISOString());
+
+  logAudit('add_employee', 'admin', `إضافة موظف جديد: ${name} (${role}) بمرتب ${salary} ج`, ctx.ip);
+  return { ok: true, id: Number(r.lastInsertRowid) };
+});
+
+route('PUT', '/api/employees/:id', 'admin', (ctx) => {
+  const id = intParam(ctx.params.id);
+  const old = db.prepare('SELECT * FROM employees WHERE id = ?').get(id);
+  if (!old) throw new ApiError(404, 'الموظف غير موجود');
+
+  const name = cleanStr(ctx.body.name ?? old.name, 100, 'اسم الموظف', true);
+  const role = cleanStr(ctx.body.role ?? old.role, 60, 'المسمى الوظيفي') || old.role;
+  const phone = toEnglishDigits(cleanStr(ctx.body.phone ?? old.phone, 30, 'الهاتف'));
+  const salary = Number(toEnglishDigits(ctx.body.salary ?? old.salary));
+  const startDate = cleanStr(ctx.body.start_date ?? old.start_date, 20, 'تاريخ التعيين');
+  const notes = cleanStr(ctx.body.notes ?? old.notes, 500, 'الملاحظات');
+  const active = ctx.body.active === undefined ? old.active : (ctx.body.active ? 1 : 0);
+
+  if (!Number.isFinite(salary) || salary < 0) throw new ApiError(400, 'المرتب غير صحيح');
+
+  db.prepare(
+    'UPDATE employees SET name = ?, role = ?, phone = ?, salary = ?, start_date = ?, notes = ?, active = ? WHERE id = ?'
+  ).run(name, role, phone, salary, startDate, notes, active, id);
+
+  logAudit('update_employee', 'admin', `تعديل بيانات الموظف: ${name} (${role})`, ctx.ip);
+  return { ok: true };
+});
+
+route('DELETE', '/api/employees/:id', 'admin', (ctx) => {
+  const id = intParam(ctx.params.id);
+  const old = db.prepare('SELECT * FROM employees WHERE id = ?').get(id);
+  if (!old) throw new ApiError(404, 'الموظف غير موجود');
+
+  db.prepare('DELETE FROM employees WHERE id = ?').run(id);
+  logAudit('delete_employee', 'admin', `حذف الموظف: ${old.name} (${old.role})`, ctx.ip);
+  return { ok: true };
+});
+
 // الأعضاء
 route('GET', '/api/members', 'staff', (ctx) => {
   const today = todayStr();
@@ -565,7 +623,10 @@ route('GET', '/api/members/:id', 'staff', (ctx) => {
     .prepare('SELECT id, checkin_at, result, reason FROM attendance WHERE member_id = ? ORDER BY id DESC LIMIT 30')
     .all(id);
   const total = db.prepare(`SELECT COUNT(*) AS c FROM attendance WHERE member_id = ? AND result = 'ok'`).get(id).c;
-  return { member: memberView(m, todayStr()), subscriptions: subs, attendance: att, totalVisits: total };
+  const today = todayStr();
+  const rawPts = db.prepare('SELECT * FROM private_trainings WHERE member_id = ? ORDER BY id DESC').all(id);
+  const pts = rawPts.map(p => ({ ...p, ...ptState(p, today) }));
+  return { member: memberView(m, today), subscriptions: subs, attendance: att, totalVisits: total, privateTrainings: pts };
 });
 
 route('PUT', '/api/members/:id', 'staff', (ctx) => {
@@ -615,6 +676,150 @@ route('POST', '/api/members/:id/subscriptions', 'staff', (ctx) => {
 route('DELETE', '/api/subscriptions/:id', 'admin', (ctx) => {
   const id = intParam(ctx.params.id);
   db.prepare(`UPDATE subscriptions SET status = 'cancelled' WHERE id = ?`).run(id);
+  return { ok: true };
+});
+
+// ---------- البرايفت / التدريب الخاص (Private Training) ----------
+function ptState(pt, today) {
+  const start = pt.start_date;
+  const days = Number(pt.duration_days) || 30;
+  const end = pt.end_date || addDays(start, days - 1);
+  const totalDays = days || (diffDays(start, end) + 1) || 30;
+
+  if (pt.status === 'cancelled') {
+    return { state: 'cancelled', days_left: 0, total_days: totalDays, elapsed_days: totalDays, end_date: end };
+  }
+
+  const daysLeft = diffDays(today, end);
+  if (today < start) {
+    return { state: 'upcoming', days_left: daysLeft, total_days: totalDays, elapsed_days: 0, end_date: end };
+  }
+  if (today > end) {
+    return { state: 'expired', days_left: 0, total_days: totalDays, elapsed_days: totalDays, end_date: end };
+  }
+
+  const elapsedDays = Math.max(0, Math.min(totalDays, totalDays - daysLeft));
+  const state = daysLeft <= 3 ? 'expiring' : 'active';
+  return { state, days_left: daysLeft, total_days: totalDays, elapsed_days: elapsedDays, end_date: end };
+}
+
+route('GET', '/api/private-trainings', 'staff', (ctx) => {
+  const today = todayStr();
+  const statusFilter = ctx.url.searchParams.get('status') || 'active';
+
+  const rows = db.prepare(`
+    SELECT pt.*, m.name AS member_name, m.code AS member_code, m.phone AS member_phone
+    FROM private_trainings pt
+    JOIN members m ON pt.member_id = m.id
+    ORDER BY pt.id DESC
+  `).all();
+
+  const list = rows.map((r) => ({ ...r, ...ptState(r, today) }));
+
+  const filtered = list.filter((r) => {
+    if (statusFilter === 'active') return r.state === 'active' || r.state === 'expiring' || r.state === 'upcoming';
+    if (statusFilter === 'expired') return r.state === 'expired';
+    return true; // 'all'
+  });
+
+  const totalRevenue = rows.reduce((acc, r) => acc + (Number(r.price) || 0), 0);
+  const totalPaid = rows.reduce((acc, r) => acc + (Number(r.paid) || 0), 0);
+  const activeCount = list.filter((r) => r.state === 'active' || r.state === 'expiring').length;
+  const expiringCount = list.filter((r) => r.state === 'expiring').length;
+  const expiredCount = list.filter((r) => r.state === 'expired').length;
+
+  return {
+    privateTrainings: filtered,
+    activeCount,
+    expiringCount,
+    expiredCount,
+    totalCount: list.length,
+    totalRevenue,
+    totalPaid
+  };
+});
+
+route('POST', '/api/members/:id/private-training', 'staff', (ctx) => {
+  const memberId = intParam(ctx.params.id);
+  const m = db.prepare('SELECT name FROM members WHERE id = ?').get(memberId);
+  if (!m) throw new ApiError(404, 'العضو غير موجود');
+
+  const trainerName = cleanStr(ctx.body.trainer_name, 100, 'اسم الكابتن/المدرب', true);
+  const trainerId = ctx.body.trainer_id ? Number(ctx.body.trainer_id) : null;
+  const packageName = cleanStr(ctx.body.package_name, 100, 'اسم الباقة') || 'شهر تدريب خاص (برايفت)';
+  const durationDays = Number(toEnglishDigits(ctx.body.duration_days || 30));
+
+  if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 3650) {
+    throw new ApiError(400, 'مدة الاشتراك بالأيام غير صحيحة');
+  }
+
+  let startDate = cleanStr(ctx.body.start_date, 20, 'تاريخ البدء') || todayStr();
+  if (!validDate(startDate)) throw new ApiError(400, 'تاريخ البدء غير صحيح');
+
+  let endDate = cleanStr(ctx.body.end_date, 20, 'تاريخ الانتهاء');
+  if (!endDate || !validDate(endDate)) {
+    endDate = addDays(startDate, durationDays - 1);
+  }
+
+  const price = Number(toEnglishDigits(ctx.body.price || 0));
+  const paid = Number(toEnglishDigits(ctx.body.paid || 0));
+  const notes = cleanStr(ctx.body.notes, 500, 'الملاحظات');
+
+  if (!Number.isFinite(price) || price < 0) throw new ApiError(400, 'السعر غير صحيح');
+  if (!Number.isFinite(paid) || paid < 0) throw new ApiError(400, 'المبلغ المدفوع غير صحيح');
+
+  const r = db.prepare(`
+    INSERT INTO private_trainings (member_id, trainer_id, trainer_name, package_name, duration_days, start_date, end_date, price, paid, notes, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+  `).run(memberId, trainerId, trainerName, packageName, durationDays, startDate, endDate, price, paid, notes, new Date().toISOString());
+
+  logAudit('add_private_training', ctx.session.role, `تسجيل اشتراك برايفت للعضو: ${m.name} مع الكابتن: ${trainerName} (${durationDays} يوم حتى ${endDate})`, ctx.ip);
+
+  return { ok: true, id: Number(r.lastInsertRowid), end_date: endDate };
+});
+
+route('PUT', '/api/private-trainings/:id', 'staff', (ctx) => {
+  const ptId = intParam(ctx.params.id);
+  const pt = db.prepare('SELECT * FROM private_trainings WHERE id = ?').get(ptId);
+  if (!pt) throw new ApiError(404, 'اشتراك البرايفت غير موجود');
+
+  const trainerName = cleanStr(ctx.body.trainer_name ?? pt.trainer_name, 100, 'اسم الكابتن/المدرب', true);
+  const packageName = cleanStr(ctx.body.package_name ?? pt.package_name, 100, 'اسم الباقة');
+  const durationDays = Number(toEnglishDigits(ctx.body.duration_days ?? pt.duration_days ?? 30));
+  let startDate = cleanStr(ctx.body.start_date ?? pt.start_date, 20, 'تاريخ البدء');
+  let endDate = cleanStr(ctx.body.end_date ?? pt.end_date, 20, 'تاريخ الانتهاء');
+
+  if (!endDate || !validDate(endDate)) {
+    endDate = addDays(startDate, durationDays - 1);
+  }
+
+  const price = Number(toEnglishDigits(ctx.body.price ?? pt.price));
+  const paid = Number(toEnglishDigits(ctx.body.paid ?? pt.paid));
+  const status = ctx.body.status ?? pt.status;
+  const notes = cleanStr(ctx.body.notes ?? pt.notes, 500, 'الملاحظات');
+
+  if (!Number.isFinite(price) || price < 0) throw new ApiError(400, 'السعر غير صحيح');
+  if (!Number.isFinite(paid) || paid < 0) throw new ApiError(400, 'المبلغ المدفوع غير صحيح');
+
+  db.prepare(`
+    UPDATE private_trainings
+    SET trainer_name = ?, package_name = ?, duration_days = ?, start_date = ?, end_date = ?, price = ?, paid = ?, status = ?, notes = ?
+    WHERE id = ?
+  `).run(trainerName, packageName, durationDays, startDate, endDate, price, paid, status, notes, ptId);
+
+  logAudit('update_private_training', ctx.session.role, `تعديل بيانات اشتراك برايفت رقم ${ptId}`, ctx.ip);
+
+  return { ok: true };
+});
+
+route('DELETE', '/api/private-trainings/:id', 'admin', (ctx) => {
+  const ptId = intParam(ctx.params.id);
+  const pt = db.prepare('SELECT id, member_id, trainer_name FROM private_trainings WHERE id = ?').get(ptId);
+  if (!pt) throw new ApiError(404, 'اشتراك البرايفت غير موجود');
+
+  db.prepare('DELETE FROM private_trainings WHERE id = ?').run(ptId);
+  logAudit('delete_private_training', 'admin', `حذف اشتراك برايفت رقم ${ptId}`, ctx.ip);
+
   return { ok: true };
 });
 

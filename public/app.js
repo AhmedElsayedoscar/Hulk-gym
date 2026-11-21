@@ -7,8 +7,10 @@ let ME = { role: 'staff', gymName: '' };
 const NAV = [
   ['#/', 'لوحة التحكم'],
   ['#/members', 'الأعضاء'],
+  ['#/private', '⭐ البرايفت (PT)'],
   ['#/attendance', 'الحضور'],
   ['#/daily-report', '📊 التقرير اليومي', 'admin'],
+  ['#/employees', '👔 الموظفين والمرتبات', 'admin'],
   ['#/plans', 'الباقات', 'admin'],
   ['#/reminders', '🔔 الإشعارات', 'admin'],
   ['#/settings', '⚙️ الإعدادات', 'admin'],
@@ -340,6 +342,131 @@ async function pageMember(id) {
       )
   );
 
+  // كارت اشتراك البرايفت (Personal Training) - بنظام المدة والعد التنازلي التلقائي
+  const activePt = (d.privateTrainings || []).find((p) => p.state === 'active' || p.state === 'expiring' || p.state === 'upcoming');
+  const latestPt = activePt || (d.privateTrainings || [])[0];
+  let ptCard = null;
+
+  if (latestPt) {
+    const totalDays = latestPt.total_days || 30;
+    const daysLeft = latestPt.days_left || 0;
+    const elapsedDays = Math.max(0, Math.min(totalDays, totalDays - daysLeft));
+    const percent = Math.min(100, Math.round((elapsedDays / totalDays) * 100));
+    const balanceDue = Number(latestPt.price) - Number(latestPt.paid);
+
+    let stateBadge = null;
+    let countdownText = '';
+    if (latestPt.state === 'active') {
+      stateBadge = h('span', { class: 'badge ok' }, 'ساري');
+      countdownText = `⏳ متبقي ${daysLeft} يوم على انتهاء البرايفت`;
+    } else if (latestPt.state === 'expiring') {
+      stateBadge = h('span', { class: 'badge warn' }, `ينتهي قريباً (${daysLeft} يوم)`);
+      countdownText = `⚠️ ينتهي الاشتراك ${daysLeft === 0 ? 'النهارده!' : `خلال ${daysLeft} يوم`}`;
+    } else if (latestPt.state === 'upcoming') {
+      stateBadge = h('span', { class: 'badge info' }, 'لم يبدأ بعد');
+      countdownText = `📅 يبدأ في ${ltr(latestPt.start_date)}`;
+    } else {
+      stateBadge = h('span', { class: 'badge bad' }, 'منتهي');
+      countdownText = `❌ انتهى الاشتراك في ${ltr(latestPt.end_date)}`;
+    }
+
+    const editPtBtn = h(
+      'button',
+      {
+        class: 'btn small',
+        onclick: () => privateModal(latestPt, true, refresh),
+      },
+      'تعديل البرايفت'
+    );
+
+    const renewPtBtn = h(
+      'button',
+      {
+        class: 'btn primary small',
+        onclick: () => privateModal({ member_id: m.id, member_name: m.name }, false, refresh),
+      },
+      'تجديد البرايفت ➕'
+    );
+
+    ptCard = h(
+      'div',
+      { class: 'card card-pt', style: 'margin-bottom:20px;' },
+      h(
+        'div',
+        { style: 'display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;' },
+        h(
+          'div',
+          null,
+          h(
+            'div',
+            { style: 'display:flex;align-items:center;gap:8px;margin-bottom:6px;' },
+            h('span', { style: 'font-size:1.4rem;' }, '⭐'),
+            h('h2', { style: 'margin:0;color:#ffd778;' }, 'اشتراك تدريب خاص (برايفت)'),
+            stateBadge
+          ),
+          h(
+            'p',
+            { class: 'muted', style: 'margin:0;font-size:0.95rem;' },
+            'الكابتن المسئول: ',
+            h('b', { style: 'color:#fff;' }, latestPt.trainer_name),
+            ' • الباقة: ',
+            h('b', { style: 'color:#fff;' }, latestPt.package_name),
+            ' • المدة: ',
+            h('b', { style: 'color:#ffd778;' }, `${totalDays} يوم`)
+          )
+        ),
+        h('div', { style: 'display:flex;gap:8px;align-items:center;' }, editPtBtn, renewPtBtn)
+      ),
+      h(
+        'div',
+        { style: 'margin:16px 0;' },
+        h(
+          'div',
+          { style: 'display:flex;justify-content:space-between;font-size:0.92rem;font-weight:600;' },
+          h('span', null, `من: ${ltr(latestPt.start_date)} ← ينتهي في: ${ltr(latestPt.end_date)}`),
+          h('span', { style: latestPt.state === 'expired' ? 'color:#ef4444;' : 'color:#10b981;' }, countdownText)
+        ),
+        h(
+          'div',
+          { class: 'pt-progress-wrap' },
+          h('div', {
+            class: 'pt-progress-bar',
+            style: `width:${percent}%;background:${latestPt.state === 'expired' ? '#ef4444' : (latestPt.state === 'expiring' ? '#f59e0b' : 'linear-gradient(90deg, #10b981 0%, #34d399 50%, #ffd778 100%)')};`
+          })
+        )
+      ),
+      h(
+        'div',
+        {
+          style:
+            'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.08);',
+        },
+        h(
+          'div',
+          { style: 'display:flex;gap:16px;font-size:0.95rem;' },
+          h('span', null, 'السعر: ', h('b', null, fmtMoney(latestPt.price) + ' ج')),
+          h('span', null, 'المدفوع: ', h('b', { style: 'color:#10b981;' }, fmtMoney(latestPt.paid) + ' ج')),
+          balanceDue > 0
+            ? h('span', { style: 'color:#ef4444;font-weight:bold;' }, `متبقي عليه: ${fmtMoney(balanceDue)} ج ⚠️`)
+            : h('span', { style: 'color:#10b981;' }, 'خالص بالكامل ✅')
+        ),
+        latestPt.notes ? h('div', { class: 'muted', style: 'font-size:0.88rem;' }, `ملاحظات: ${latestPt.notes}`) : null
+      )
+    );
+  } else {
+    actions.appendChild(
+      h(
+        'button',
+        {
+          class: 'btn',
+          style: 'border-color:rgba(229,169,60,0.6);color:#ffd778;font-weight:bold;',
+          onclick: () => privateModal({ member_id: m.id, member_name: m.name }, false, refresh),
+        },
+        '⭐ اشتراك برايفت جديد'
+      )
+    );
+  }
+
   app.replaceChildren(
     h(
       'div',
@@ -348,7 +475,8 @@ async function pageMember(id) {
         'div',
         { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
         backBtn('#/members', 'رجوع للأعضاء'),
-        h('h1', { style: 'margin:0;' }, m.name)
+        h('h1', { style: 'margin:0;' }, m.name),
+        activePt ? h('span', { class: 'badge ok', style: 'background:linear-gradient(135deg, #ffd778 0%, #e5a93c 100%);color:#0b0c10;font-weight:900;' }, '⭐ VIP Private') : null
       )
     ),
     h(
@@ -371,6 +499,7 @@ async function pageMember(id) {
         )
       )
     ),
+    ptCard || '',
     h(
       'div',
       { class: 'card' },
@@ -1282,6 +1411,656 @@ async function pageDailyReport(query) {
   await load(selectedDate);
 }
 
+// ---------- مشتركي التدريب الخاص (البرايفت - PT) ----------
+async function pagePrivateTrainings(query = '') {
+  const params = new URLSearchParams(query);
+  const statusFilter = params.get('status') || 'active';
+
+  const data = await api('GET', `/api/private-trainings?status=${statusFilter}`);
+  const pts = data.privateTrainings || [];
+
+  const tiles = h(
+    'div',
+    { class: 'tiles', style: 'margin-bottom:20px;' },
+    tile('ok', data.activeCount, 'اشتراكات سارية', '#/private?status=active'),
+    tile('warn', data.expiringCount, 'تنتهي خلال 3 أيام', '#/private?status=active'),
+    tile('bad', data.expiredCount, 'اشتراكات منتهية', '#/private?status=expired'),
+    tile('info', ltr(Number(data.totalRevenue || 0).toLocaleString('ar-EG')) + ' ج', 'إجمالي الإيرادات')
+  );
+
+  const filterTabs = h(
+    'div',
+    { class: 'row', style: 'margin-bottom:16px;gap:8px;align-items:center;flex-wrap:wrap;' },
+    h('span', { class: 'muted', style: 'font-weight:bold;' }, 'تصفية:'),
+    h('a', { class: `btn small ${statusFilter === 'active' ? 'primary' : ''}`, href: '#/private?status=active' }, 'الساري حالياً'),
+    h('a', { class: `btn small ${statusFilter === 'expired' ? 'primary' : ''}`, href: '#/private?status=expired' }, 'المنتهي'),
+    h('a', { class: `btn small ${statusFilter === 'all' ? 'primary' : ''}`, href: '#/private?status=all' }, 'كل الاشتراكات')
+  );
+
+  const searchInput = h('input', {
+    type: 'search',
+    placeholder: 'بحث باسم العضو أو الكابتن أو الكود...',
+    style: 'margin-bottom:16px;',
+  });
+
+  const tbody = h('tbody');
+
+  function renderTable(list) {
+    if (list.length === 0) {
+      tbody.replaceChildren(
+        h('tr', null, h('td', { colspan: 7, class: 'muted', style: 'text-align:center;padding:30px;' }, 'لا توجد اشتراكات برايفت مطابقة.'))
+      );
+      return;
+    }
+
+    tbody.replaceChildren(
+      ...list.map((pt) => {
+        const totalDays = pt.total_days || 30;
+        const daysLeft = pt.days_left || 0;
+        const elapsedDays = Math.max(0, Math.min(totalDays, totalDays - daysLeft));
+        const percent = Math.min(100, Math.round((elapsedDays / totalDays) * 100));
+        const balanceDue = Number(pt.price) - Number(pt.paid);
+
+        const memberLink = h(
+          'a',
+          { href: `#/members/${pt.member_id}`, style: 'font-weight:bold;color:var(--brand-light);text-decoration:none;' },
+          pt.member_name,
+          h('span', { class: 'code mono', style: 'margin-inline-start:6px;font-size:0.85rem;' }, pt.member_code)
+        );
+
+        let countdownLabel = '';
+        let barColor = 'linear-gradient(90deg, #10b981 0%, #34d399 50%, #ffd778 100%)';
+        let statusBadge = null;
+
+        if (pt.state === 'active') {
+          statusBadge = h('span', { class: 'badge ok' }, 'ساري');
+          countdownLabel = `باقي ${daysLeft} يوم`;
+        } else if (pt.state === 'expiring') {
+          statusBadge = h('span', { class: 'badge warn' }, 'ينتهي قريباً');
+          countdownLabel = daysLeft === 0 ? 'ينتهي اليوم!' : `باقي ${daysLeft} يوم`;
+          barColor = '#f59e0b';
+        } else if (pt.state === 'upcoming') {
+          statusBadge = h('span', { class: 'badge info' }, 'لم يبدأ');
+          countdownLabel = `يبدأ ${ltr(pt.start_date)}`;
+        } else {
+          statusBadge = h('span', { class: 'badge bad' }, 'منتهي');
+          countdownLabel = 'منتهي';
+          barColor = '#ef4444';
+        }
+
+        const editBtn = h(
+          'button',
+          {
+            class: 'btn small',
+            onclick: () => privateModal(pt, true, () => route()),
+          },
+          'تعديل'
+        );
+
+        const deleteBtn = ME.role === 'admin'
+          ? h(
+              'button',
+              {
+                class: 'btn small danger',
+                onclick: async () => {
+                  if (!confirm(`هل أنت متأكد من حذف اشتراك البرايفت للعضو ${pt.member_name}؟`)) return;
+                  try {
+                    await api('DELETE', `/api/private-trainings/${pt.id}`);
+                    toast('تم الحذف');
+                    route();
+                  } catch (err) {
+                    toast(err.message, true);
+                  }
+                },
+              },
+              'حذف'
+            )
+          : null;
+
+        return h(
+          'tr',
+          null,
+          h('td', null, memberLink),
+          h('td', null, h('b', null, pt.trainer_name)),
+          h('td', null, pt.package_name),
+          h(
+            'td',
+            { style: 'min-width:160px;' },
+            h('div', { style: 'font-size:0.88rem;display:flex;justify-content:space-between;margin-bottom:4px;' },
+              h('span', { style: 'font-weight:600;' }, countdownLabel),
+              h('span', { class: 'muted', style: 'font-size:0.8rem;' }, `${ltr(pt.end_date)}`)
+            ),
+            h('div', { class: 'pt-progress-wrap', style: 'margin:0;height:8px;' },
+              h('div', { class: 'pt-progress-bar', style: `width:${percent}%;background:${barColor};` })
+            )
+          ),
+          h(
+            'td',
+            null,
+            h('div', null, fmtMoney(pt.price) + ' ج'),
+            balanceDue > 0
+              ? h('div', { style: 'color:#ef4444;font-size:0.82rem;font-weight:bold;' }, `باقي: ${fmtMoney(balanceDue)}`)
+              : h('div', { style: 'color:#10b981;font-size:0.82rem;' }, 'خالص')
+          ),
+          h('td', null, statusBadge),
+          h('td', { style: 'white-space:nowrap;display:flex;gap:6px;' }, editBtn, deleteBtn)
+        );
+      })
+    );
+  }
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+    if (!q) {
+      renderTable(pts);
+      return;
+    }
+    const filtered = pts.filter((p) =>
+      (p.member_name || '').toLowerCase().includes(q) ||
+      (p.trainer_name || '').toLowerCase().includes(q) ||
+      (p.member_code || '').toLowerCase().includes(q)
+    );
+    renderTable(filtered);
+  });
+
+  renderTable(pts);
+
+  app.replaceChildren(
+    h(
+      'div',
+      { class: 'page-head' },
+      h(
+        'div',
+        { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
+        backBtn('#/', 'الرئيسية'),
+        h('h1', { style: 'margin:0;' }, '⭐ مشتركي التدريب الخاص (البرايفت)')
+      ),
+      h('button', { class: 'btn primary', onclick: () => privateModal(null, false, () => route()) }, '➕ اشتراك برايفت جديد')
+    ),
+    tiles,
+    h('div', { class: 'card' }, filterTabs, searchInput),
+    h(
+      'div',
+      { class: 'card table-wrap' },
+      h(
+        'table',
+        null,
+        h(
+          'thead',
+          null,
+          h(
+            'tr',
+            null,
+            ['العضو', 'الكابتن 🏋️', 'الباقة', 'العد التنازلي والانتهاء', 'المبلغ', 'الحالة', 'إجراءات'].map((t) => h('th', null, t))
+          )
+        ),
+        tbody
+      )
+    )
+  );
+}
+
+async function privateModal(ptOrMember, isEdit, onDone) {
+  let members = [];
+  let coaches = [];
+
+  try {
+    const empData = await api('GET', '/api/employees');
+    coaches = empData.employees || [];
+  } catch {}
+
+  let memberId = ptOrMember ? (ptOrMember.member_id || ptOrMember.id) : null;
+  let memberName = ptOrMember ? (ptOrMember.member_name || ptOrMember.name) : '';
+
+  let memberSelectEl = null;
+  if (!memberId) {
+    try {
+      members = await api('GET', '/api/members?status=all');
+    } catch {}
+    memberSelectEl = h(
+      'select',
+      { name: 'member_id', required: true },
+      h('option', { value: '' }, '-- اختر العضو المشترك --'),
+      ...members.map((m) => h('option', { value: m.id }, `${m.name} (${m.code})`))
+    );
+  }
+
+  const coachOptions = [
+    h('option', { value: '' }, '-- اكتب اسم الكابتن بالأسفل أو اختر من هنا --'),
+    ...coaches.map((c) => h('option', { value: c.name }, `${c.name} (${c.role || 'مدرب'})`))
+  ];
+
+  const coachSelect = h('select', null, coachOptions);
+  const trainerInput = h('input', {
+    name: 'trainer_name',
+    required: true,
+    placeholder: 'مثلاً: كابتن أحمد محمود',
+    value: isEdit ? ptOrMember.trainer_name : ''
+  });
+
+  coachSelect.addEventListener('change', () => {
+    if (coachSelect.value) trainerInput.value = coachSelect.value;
+  });
+
+  const durationOptions = [
+    { label: 'شهر (30 يوم)', days: 30, name: 'شهر تدريب خاص' },
+    { label: 'شهرين (60 يوم)', days: 60, name: 'شهرين تدريب خاص' },
+    { label: '3 شهور (90 يوم)', days: 90, name: '3 شهور تدريب خاص' },
+    { label: '6 شهور (180 يوم)', days: 180, name: '6 شهور تدريب خاص' },
+    { label: 'سنة (365 يوم)', days: 365, name: 'سنة تدريب خاص' },
+    { label: 'أيام مخصصة...', days: 0, name: 'تدريب خاص مخصص' }
+  ];
+
+  const durationSelect = h(
+    'select',
+    null,
+    ...durationOptions.map(d => h('option', { value: d.days, selected: isEdit ? (ptOrMember.duration_days === d.days) : (d.days === 30) }, d.label))
+  );
+
+  const durationDaysInput = h('input', {
+    name: 'duration_days',
+    type: 'number',
+    min: 1,
+    max: 3650,
+    required: true,
+    value: isEdit ? (ptOrMember.duration_days || 30) : 30
+  });
+
+  const packageInput = h('input', {
+    name: 'package_name',
+    placeholder: 'مثلاً: شهر تدريب خاص / كورس تأهيل',
+    value: isEdit ? ptOrMember.package_name : 'شهر تدريب خاص (برايفت)'
+  });
+
+  const startDateInput = h('input', {
+    name: 'start_date',
+    type: 'date',
+    value: isEdit ? ptOrMember.start_date : todayLocal()
+  });
+
+  const endDateInput = h('input', {
+    name: 'end_date',
+    type: 'date',
+    value: isEdit ? ptOrMember.end_date : ''
+  });
+
+  function updateEndDate() {
+    const start = startDateInput.value;
+    const days = Number(durationDaysInput.value) || 30;
+    if (start) {
+      const d = new Date(start + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() + days - 1);
+      endDateInput.value = d.toISOString().slice(0, 10);
+    }
+  }
+
+  if (!isEdit) updateEndDate();
+
+  durationSelect.addEventListener('change', () => {
+    const days = Number(durationSelect.value);
+    if (days > 0) {
+      durationDaysInput.value = days;
+      const opt = durationOptions.find(o => o.days === days);
+      if (opt && !isEdit) packageInput.value = opt.name;
+    }
+    updateEndDate();
+  });
+
+  durationDaysInput.addEventListener('input', updateEndDate);
+  startDateInput.addEventListener('change', updateEndDate);
+
+  const priceInput = h('input', {
+    name: 'price',
+    type: 'number',
+    min: 0,
+    step: '50',
+    required: true,
+    placeholder: 'السعر الإجمالي بالجنيه',
+    value: isEdit ? ptOrMember.price : 1500
+  });
+
+  const paidInput = h('input', {
+    name: 'paid',
+    type: 'number',
+    min: 0,
+    step: '50',
+    required: true,
+    placeholder: 'المبلغ المدفوع بالجنيه',
+    value: isEdit ? ptOrMember.paid : 1500
+  });
+
+  const statusSelect = isEdit
+    ? h(
+        'select',
+        { name: 'status' },
+        h('option', { value: 'active', selected: ptOrMember.status === 'active' }, 'ساري'),
+        h('option', { value: 'cancelled', selected: ptOrMember.status === 'cancelled' }, 'ملغي')
+      )
+    : null;
+
+  const notesInput = h('textarea', {
+    name: 'notes',
+    rows: 2,
+    placeholder: 'ملاحظات خاصة بالتدريب أو المواعيد...',
+    value: isEdit ? ptOrMember.notes : ''
+  });
+
+  const formFields = [
+    memberSelectEl ? field('العضو المشترك *', memberSelectEl) : h('div', { class: 'field' }, h('label', null, 'العضو المشترك'), h('b', { style: 'color:#ffd778;font-size:1.1rem;' }, memberName)),
+    coaches.length > 0 ? field('اختيار سريع للمدرب', coachSelect) : null,
+    field('اسم الكابتن / المدرب المسئول *', trainerInput),
+    h('div', { class: 'row' }, field('المدة بالشهور', durationSelect), field('المدة بالأيام *', durationDaysInput)),
+    field('اسم الباقة / الوصف', packageInput),
+    h('div', { class: 'row' }, field('تاريخ البداية *', startDateInput), field('تاريخ الانتهاء (تلقائي) *', endDateInput)),
+    h('div', { class: 'row' }, field('سعر البرايفت (ج.م) *', priceInput), field('المبلغ المدفوع (ج.م) *', paidInput)),
+    isEdit ? field('حالة الاشتراك', statusSelect) : null,
+    field('ملاحظات إضافية', notesInput)
+  ].filter(Boolean);
+
+  openModal(
+    isEdit ? 'تعديل اشتراك البرايفت' : 'اشتراك برايفت جديد',
+    formFields,
+    async () => {
+      const selectedMemberId = memberId || (memberSelectEl ? memberSelectEl.value : null);
+      const trainerName = trainerInput.value.trim();
+      const packageName = packageInput.value.trim() || 'شهر تدريب خاص (برايفت)';
+      const durationDays = Number(durationDaysInput.value) || 30;
+      const startDate = startDateInput.value || todayLocal();
+      const endDate = endDateInput.value;
+      const price = Number(priceInput.value) || 0;
+      const paid = Number(paidInput.value) || 0;
+      const notes = notesInput.value.trim();
+
+      if (!selectedMemberId) {
+        alert('يرجى اختيار العضو المشترك');
+        return false;
+      }
+      if (!trainerName) {
+        alert('اسم الكابتن مطلوب');
+        return false;
+      }
+      if (durationDays < 1) {
+        alert('المدة يجب أن تكون يوماً واحداً على الأقل');
+        return false;
+      }
+
+      if (isEdit) {
+        const status = statusSelect ? statusSelect.value : 'active';
+        await api('PUT', `/api/private-trainings/${ptOrMember.id}`, {
+          trainer_name: trainerName,
+          package_name: packageName,
+          duration_days: durationDays,
+          start_date: startDate,
+          end_date: endDate,
+          price,
+          paid,
+          status,
+          notes
+        });
+        toast('تم حفظ التعديلات بنجاح');
+      } else {
+        await api('POST', `/api/members/${selectedMemberId}/private-training`, {
+          trainer_name: trainerName,
+          package_name: packageName,
+          duration_days: durationDays,
+          start_date: startDate,
+          end_date: endDate,
+          price,
+          paid,
+          notes
+        });
+        toast('تم تسجيل اشتراك البرايفت بنجاح! ⭐');
+      }
+
+      if (onDone) await onDone();
+      return true;
+    },
+    isEdit ? 'حفظ التعديلات' : 'تسجيل الاشتراك'
+  );
+}
+
+// ---------- الموظفين والمرتبات (للمدير) ----------
+async function pageEmployees() {
+  if (ME.role !== 'admin') {
+    app.replaceChildren(h('div', { class: 'alert bad' }, 'هذه الصفحة للمدير فقط'));
+    return;
+  }
+
+  async function load() {
+    const tile = (cls, num, lbl, href) =>
+      h(
+        href ? 'a' : 'div',
+        { class: `tile ${cls}`, href, style: href ? 'color:inherit;text-decoration:none' : null },
+        h('div', { class: 'num' }, num),
+        h('div', { class: 'lbl' }, lbl)
+      );
+    const data = await api('GET', '/api/employees');
+    const employees = data.employees || [];
+    const totalSalary = Number(data.totalSalary) || 0;
+    const activeCount = Number(data.activeCount) || 0;
+    const totalCount = Number(data.totalCount) || 0;
+
+    const tiles = h(
+      'div',
+      { class: 'tiles', style: 'margin-bottom:20px;' },
+      tile('info', totalCount, 'إجمالي الموظفين'),
+      tile('ok', activeCount, 'على رأس العمل'),
+      tile('warn', ltr(totalSalary.toLocaleString('ar-EG')) + ' ج', 'إجمالي المرتبات الشهرية')
+    );
+
+    const tbody = h('tbody');
+    if (employees.length === 0) {
+      tbody.appendChild(
+        h(
+          'tr',
+          null,
+          h(
+            'td',
+            { colspan: 7, class: 'muted', style: 'text-align:center;padding:30px;' },
+            'لا يوجد موظفون مسجلون حالياً. اضغط على "+ إضافة موظف جديد" للبدء.'
+          )
+        )
+      );
+    } else {
+      employees.forEach((emp) => {
+        const phoneLink = emp.phone
+          ? h('a', { href: `tel:${emp.phone}`, style: 'direction:ltr;display:inline-block;' }, ltr(emp.phone))
+          : h('span', { class: 'muted' }, '—');
+
+        const statusBadge = emp.active
+          ? h('span', { class: 'badge ok' }, 'نشط')
+          : h('span', { class: 'badge', style: 'opacity:0.6;' }, 'متوقف');
+
+        const editBtn = h(
+          'button',
+          {
+            class: 'btn small',
+            onclick: () => employeeModal(emp, load),
+          },
+          'تعديل'
+        );
+
+        const deleteBtn = h(
+          'button',
+          {
+            class: 'btn small danger',
+            onclick: async () => {
+              if (!confirm(`هل أنت متأكد من حذف الموظف "${emp.name}"؟`)) return;
+              try {
+                await api('DELETE', `/api/employees/${emp.id}`);
+                await load();
+              } catch (err) {
+                alert(err.message || 'فشل حذف الموظف');
+              }
+            },
+          },
+          'حذف'
+        );
+
+        tbody.appendChild(
+          h(
+            'tr',
+            { style: emp.active ? '' : 'opacity:0.65;background:rgba(0,0,0,0.1);' },
+            h('td', { style: 'font-weight:600;' }, emp.name),
+            h('td', null, h('span', { class: 'badge info' }, emp.role || 'موظف')),
+            h('td', null, phoneLink),
+            h(
+              'td',
+              { style: 'font-weight:bold;color:#10b981;' },
+              ltr(Number(emp.salary || 0).toLocaleString('ar-EG')) + ' ج'
+            ),
+            h('td', { class: 'muted' }, emp.start_date || '—'),
+            h('td', null, statusBadge),
+            h('td', { style: 'white-space:nowrap;display:flex;gap:6px;' }, editBtn, deleteBtn)
+          )
+        );
+      });
+    }
+
+    const tableWrap = h(
+      'div',
+      { class: 'card table-wrap' },
+      h(
+        'table',
+        null,
+        h(
+          'thead',
+          null,
+          h(
+            'tr',
+            null,
+            ['اسم الموظف', 'الوظيفة', 'الهاتف', 'المرتب الشهري', 'تاريخ التعيين', 'الحالة', 'إجراءات'].map((t) =>
+              h('th', null, t)
+            )
+          )
+        ),
+        tbody
+      )
+    );
+
+    app.replaceChildren(
+      h(
+        'div',
+        { class: 'page-head' },
+        h(
+          'div',
+          { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
+          backBtn('#/', 'الرئيسية'),
+          h('h1', { style: 'margin:0;' }, '👔 إدارة الموظفين والمرتبات')
+        ),
+        h('button', { class: 'btn primary', onclick: () => employeeModal(null, load) }, '➕ إضافة موظف جديد')
+      ),
+      tiles,
+      tableWrap
+    );
+  }
+
+  await load();
+}
+
+function employeeModal(emp, onSaved) {
+  const isEdit = !!emp;
+  const nameInput = h('input', {
+    name: 'name',
+    required: true,
+    maxlength: 100,
+    placeholder: 'مثلاً: كابتن محمد علي',
+    value: emp ? emp.name : '',
+  });
+
+  const roleInput = h('input', {
+    name: 'role',
+    maxlength: 60,
+    placeholder: 'مثلاً: مدرب صالة، استقبال، كابتن، نظافة',
+    value: emp ? emp.role : 'مدرب',
+  });
+
+  const phoneInput = h('input', {
+    name: 'phone',
+    type: 'tel',
+    maxlength: 30,
+    placeholder: '01xxxxxxxxx',
+    style: 'direction:ltr',
+    value: emp ? emp.phone : '',
+  });
+
+  const salaryInput = h('input', {
+    name: 'salary',
+    type: 'number',
+    min: 0,
+    step: '50',
+    required: true,
+    placeholder: 'المرتب الشهري بالجنيه',
+    value: emp ? emp.salary : '',
+  });
+
+  const startDateInput = h('input', {
+    name: 'start_date',
+    type: 'date',
+    value: emp ? emp.start_date : todayLocal(),
+  });
+
+  const notesInput = h('textarea', {
+    name: 'notes',
+    rows: 2,
+    placeholder: 'أي ملاحظات أو مواعيد شيفتات...',
+    value: emp ? emp.notes : '',
+  });
+
+  const activeCheck = h('input', {
+    type: 'checkbox',
+    name: 'active',
+    style: 'width:auto;margin-inline-end:8px;',
+    checked: emp ? !!emp.active : true,
+  });
+
+  const formFields = [
+    field('اسم الموظف *', nameInput),
+    h('div', { class: 'row' }, field('المسمى الوظيفي', roleInput), field('رقم الهاتف', phoneInput)),
+    h('div', { class: 'row' }, field('المرتب الشهري (ج.م) *', salaryInput), field('تاريخ بدء العمل', startDateInput)),
+    field('ملاحظات', notesInput),
+  ];
+
+  if (isEdit) {
+    formFields.push(h('div', { class: 'field' }, h('label', null, activeCheck, 'الموظف على رأس العمل (نشط)')));
+  }
+
+  openModal(
+    isEdit ? 'تعديل بيانات موظف' : 'إضافة موظف جديد',
+    formFields,
+    async () => {
+      const name = nameInput.value.trim();
+      const role = roleInput.value.trim() || 'موظف';
+      const phone = phoneInput.value.trim();
+      const salary = Number(salaryInput.value) || 0;
+      const startDate = startDateInput.value || todayLocal();
+      const notes = notesInput.value.trim();
+      const active = isEdit ? activeCheck.checked : true;
+
+      if (!name) {
+        alert('اسم الموظف مطلوب');
+        return false;
+      }
+      if (salary < 0) {
+        alert('المرتب لا يمكن أن يكون سالباً');
+        return false;
+      }
+
+      const payload = { name, role, phone, salary, start_date: startDate, notes, active };
+
+      if (isEdit) {
+        await api('PUT', `/api/employees/${emp.id}`, payload);
+      } else {
+        await api('POST', '/api/employees', payload);
+      }
+
+      if (onSaved) await onSaved();
+      return true;
+    },
+    isEdit ? 'حفظ التعديلات' : 'إضافة الموظف'
+  );
+}
+
 // ---------- الباقات (للمدير) ----------
 async function pagePlans() {
   if (ME.role !== 'admin') {
@@ -1494,7 +2273,7 @@ async function pageReminders() {
     } catch (e) { toast(e.message, true); }
   }}, '💾 حفظ إعدادات التذكير');
 
-  app.replaceChildren(
+app.replaceChildren(
     h('div', { class: 'page-head' },
       h(
         'div',
@@ -1865,6 +2644,27 @@ async function pageSettings() {
     }
   }
 
+  // كارت شؤون الموظفين والمرتبات
+  const empCard = h(
+    'div',
+    { class: 'card', style: 'margin-bottom:20px;' },
+    h(
+      'div',
+      { style: 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;' },
+      h(
+        'div',
+        null,
+        h('h2', { style: 'margin:0 0 6px 0;' }, '👔 شؤون الموظفين والمرتبات'),
+        h(
+          'p',
+          { class: 'muted', style: 'margin:0;font-size:0.9rem;' },
+          'إضافة ومتابعة الموظفين والمدربين، وتحديد المرتبات الشهرية وحساب إجمالي المصروفات.'
+        )
+      ),
+      h('a', { class: 'btn primary', href: '#/employees' }, 'فتح صفحة الموظفين 👈')
+    )
+  );
+
   renderBackupSection();
 
   app.replaceChildren(
@@ -1876,6 +2676,7 @@ async function pageSettings() {
         h('h1', { style: 'margin:0;' }, '⚙️ الإعدادات وحماية البيانات')
       )
     ),
+    empCard,
     backupCard,
     adminCard,
     staffCard
@@ -1892,8 +2693,10 @@ async function route() {
     if (pathPart === '#/' || pathPart === '#') await pageDashboard();
     else if (pathPart === '#/members') await pageMembers(query);
     else if ((m = pathPart.match(/^#\/members\/(\d+)$/))) await pageMember(m[1]);
+    else if (pathPart === '#/private') await pagePrivateTrainings(query);
     else if (pathPart === '#/attendance') await pageAttendance();
     else if (pathPart === '#/daily-report') await pageDailyReport(query);
+    else if (pathPart === '#/employees') await pageEmployees();
     else if (pathPart === '#/plans') await pagePlans();
     else if (pathPart === '#/reminders') await pageReminders();
     else if (pathPart === '#/settings') await pageSettings();

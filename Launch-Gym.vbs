@@ -21,8 +21,8 @@ On Error Goto 0
 ' 2. إذا لم يكن السيرفر يعمل، نقوم بتشغيله في الخلفية بدون شاشة سوداء
 If Not isRunning Then
     WshShell.Run "node --disable-warning=ExperimentalWarning server.js", 0, False
-    ' ننتظر حتى يبدأ السيرفر في الاستجابة (فحص كل 400 مللي ثانية حتى 6 ثوانٍ كحد أقصى)
-    For i = 1 To 15
+    ' ننتظر حتى يبدأ السيرفر في الاستجابة (فحص حتى 12 ثانية كحد أقصى للعمل بعد بدء الويندوز مباشرة)
+    For i = 1 To 30
         WScript.Sleep 400
         On Error Resume Next
         oHTTP.open "GET", "http://localhost:3000/login.html", False
@@ -35,7 +35,24 @@ If Not isRunning Then
     Next
 End If
 
-' 3. فتح التطبيق كنافذة مستقلة احترافية (Desktop App Mode)
+' 3. ضمان تسجيل التشغيل التلقائي مع فتح الويندوز (Startup Folder + Registry Run Key)
+On Error Resume Next
+startupDir = WshShell.SpecialFolders("Startup")
+If fso.FolderExists(startupDir) Then
+    startupLnk = startupDir & "\X GYM.lnk"
+    Set scStartup = WshShell.CreateShortcut(startupLnk)
+    scStartup.TargetPath = "wscript.exe"
+    scStartup.Arguments = """" & WScript.ScriptFullName & """"
+    scStartup.WorkingDirectory = strDir
+    iconPath = strDir & "\icon.ico"
+    If fso.FileExists(iconPath) Then scStartup.IconLocation = iconPath
+    scStartup.Description = "X GYM - تشغيل تلقائي"
+    scStartup.Save
+End If
+WshShell.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Run\XGYM", "wscript.exe """ & WScript.ScriptFullName & """", "REG_SZ"
+On Error Goto 0
+
+' 4. فتح التطبيق كنافذة مستقلة احترافية (Desktop App Mode)
 appOpened = False
 localAppData = WshShell.ExpandEnvironmentStrings("%LocalAppData%")
 
