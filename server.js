@@ -3,7 +3,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { db, DATA_DIR } = require('./db');
+const os = require('os');
+const { db, DATA_DIR, restoreDatabase } = require('./db');
 const { toBarcode } = require('./qr');
 
 // ---------- الإعدادات ----------
@@ -25,16 +26,22 @@ function getStaffPassword() {
   return (row && row.value) || process.env.STAFF_PASSWORD || 'staff123';
 }
 
-// مفتاح توقيع الجلسات (يتولد مرة واحدة ويتخزن)
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+// تشفير كلمات المرور والتحقق منها
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
   const derivedKey = crypto.scryptSync(password, salt, 64).toString('hex');
   return `scrypt:${salt}:${derivedKey}`;
 }
 
-function verifyPasswordAndUpgrade(password, storedValue, settingKey) {
-  if (!storedValue) return false;
-  if (storedValue.startsWith('scrypt:')) {
+function verifyPassword(password, storedValue) {
+  if (!storedValue || !password) return false;
+  if (typeof storedValue === 'string' && storedValue.startsWith('scrypt:')) {
     const parts = storedValue.split(':');
     if (parts.length !== 3) return false;
     const salt = parts[1];
@@ -44,12 +51,18 @@ function verifyPasswordAndUpgrade(password, storedValue, settingKey) {
     const b = Buffer.from(derivedKey, 'hex');
     return a.length === b.length && crypto.timingSafeEqual(a, b);
   }
-  // في حال كانت كلمة المرور القديمة نصاً عادياً (Plaintext) يتم التحقق وتشفيرها فورياً في القاعدة
-  if (safeEqual(password, storedValue)) {
-    try {
-      setSetting(settingKey, hashPassword(password));
-    } catch {
-      /* ignore */
+  return safeEqual(password, storedValue);
+}
+
+function verifyPasswordAndUpgrade(password, storedValue, settingKey) {
+  if (verifyPassword(password, storedValue)) {
+    // في حال كانت كلمة المرور القديمة نصاً عادياً (Plaintext) يتم ترقيتها وتشفيرها فورياً في القاعدة
+    if (typeof storedValue === 'string' && !storedValue.startsWith('scrypt:')) {
+      try {
+        setSetting(settingKey, hashPassword(password));
+      } catch {
+        /* ignore */
+      }
     }
     return true;
   }
@@ -57,18 +70,7 @@ function verifyPasswordAndUpgrade(password, storedValue, settingKey) {
 }
 
 function isDefaultPassword(storedValue, defaultPw) {
-  if (!storedValue || storedValue === defaultPw) return true;
-  if (storedValue.startsWith('scrypt:')) {
-    const parts = storedValue.split(':');
-    if (parts.length !== 3) return false;
-    const salt = parts[1];
-    const hash = parts[2];
-    const derivedKey = crypto.scryptSync(defaultPw, salt, 64).toString('hex');
-    const a = Buffer.from(hash, 'hex');
-    const b = Buffer.from(derivedKey, 'hex');
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
-  }
-  return false;
+  return verifyPassword(defaultPw, storedValue);
 }
 
 // سجل العمليات والتدقيق الإداري (Audit Logging)
@@ -416,8 +418,8 @@ route('POST', '/api/logout', null, () => ({
 }));
 
 route('GET', '/api/me', 'staff', (ctx) => {
-  const isDefaultStaff = getStaffPassword() === 'staff123';
-  const isDefaultAdmin = getAdminPassword() === 'admin123';
+  const isDefaultStaff = isDefaultPassword(getStaffPassword(), 'staff123');
+  const isDefaultAdmin = isDefaultPassword(getAdminPassword(), 'admin123');
   return {
     role: ctx.session.role,
     gymName: GYM_NAME,
@@ -1212,7 +1214,8 @@ route('POST', '/api/settings/change-staff-password', 'admin', (ctx) => {
   if (!newPw || newPw.length < 4) {
     throw new ApiError(400, 'كلمة المرور يجب ألا تقل عن 4 حروف أو أرقام');
   }
-  setSetting('staff_password', newPw);
+  setSetting('staff_password', hashPassword(newPw));
+  logAudit('change_staff_password', ctx.session?.role || 'admin', 'تم تغيير كلمة مرور الموظفين');
   return { ok: true, message: 'تم تغيير كلمة مرور الموظفين (Staff) بنجاح' };
 });
 
@@ -1223,7 +1226,7 @@ route('POST', '/api/settings/change-admin-password', 'admin', (ctx) => {
   if (!currentPw) {
     throw new ApiError(400, 'يرجى إدخال كلمة المرور الحالية للمدير');
   }
-  if (!safeEqual(currentPw, getAdminPassword())) {
+  if (!verifyPassword(currentPw, getAdminPassword())) {
     throw new ApiError(400, 'كلمة المرور الحالية للمدير غير صحيحة');
   }
   if (!newPw || newPw.length < 4) {
@@ -1232,7 +1235,8 @@ route('POST', '/api/settings/change-admin-password', 'admin', (ctx) => {
   if (currentPw === newPw) {
     throw new ApiError(400, 'كلمة المرور الجديدة مطابقة للكلمة الحالية، يرجى كتابة كلمة مرور مختلفة');
   }
-  setSetting('admin_password', newPw);
+  setSetting('admin_password', hashPassword(newPw));
+  logAudit('change_admin_password', ctx.session?.role || 'admin', 'تم تغيير كلمة مرور المدير');
   return { ok: true, message: 'تم تغيير كلمة مرور المدير (Admin) بنجاح' };
 });
 
@@ -1240,31 +1244,31 @@ route('POST', '/api/settings/change-admin-password', 'admin', (ctx) => {
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
-function getSecondaryBackupDir() {
+// دالة تحديد مسار البارتشن الآمن (خارج C: تماماً لحماية البيانات عند سقوط الويندوز)
+function getSafePartitionDir() {
   const customPath = getSetting('backup_external_dir', '').trim();
   if (customPath && fs.existsSync(customPath)) return customPath;
 
-  const currentRoot = path.parse(path.resolve(DATA_DIR)).root.toUpperCase();
-
-  // 1. فحص هل توجد فلاشة USB أو درايف خارجي يحتوي بالفعل على مجلد gym-backups
-  for (let code = 68; code <= 90; code++) { // من D إلى Z
-    const drv = String.fromCharCode(code) + ':\\';
-    if (drv === currentRoot) continue;
+  // البحث عن بارتشن آمن خارج C: بالترتيب (الأولوية لـ F: ثم N: ثم A: ثم غيرها)
+  const candidateDrives = ['F:', 'N:', 'A:', 'D:', 'E:', 'G:', 'H:'];
+  for (const drv of candidateDrives) {
+    const root = drv + '\\';
     try {
-      const existing = path.join(drv, 'gym-backups');
-      if (fs.existsSync(existing)) return existing;
+      if (fs.existsSync(root)) {
+        const target = path.join(root, 'gym-backups');
+        if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true });
+        return target;
+      }
     } catch {}
   }
 
-  // 2. إذا لم يكن المجلد موجوداً، نبحث عن أول فلاشة USB أو بارتشن متاح وننشئ المجلد عليه تلقائياً
-  for (let code = 68; code <= 90; code++) { // من D إلى Z
-    const drv = String.fromCharCode(code) + ':\\';
-    if (drv === currentRoot) continue;
+  for (let code = 68; code <= 90; code++) {
+    const root = String.fromCharCode(code) + ':\\';
     try {
-      if (fs.existsSync(drv)) {
-        const secPath = path.join(drv, 'gym-backups');
-        fs.mkdirSync(secPath, { recursive: true });
-        return secPath;
+      if (fs.existsSync(root)) {
+        const target = path.join(root, 'gym-backups');
+        if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true });
+        return target;
       }
     } catch {}
   }
@@ -1302,35 +1306,44 @@ function createLocalBackup(prefix = 'gym-backup') {
   db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
 
   const now = new Date();
-  const dateStr = now.toLocaleDateString('en-CA', { timeZone: TZ });
-  const timeStr = now
-    .toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })
-    .replace(':', '-');
-  const filename = `${prefix}-${dateStr}_${timeStr}.db`;
+  const dateStr = now.toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD
+  const filename = `${prefix}-${dateStr}.db`;
 
   const srcDb = path.join(DATA_DIR, 'gym.db');
   const destPrimary = path.join(BACKUP_DIR, filename);
 
   fs.copyFileSync(srcDb, destPrimary);
 
-  let secondaryPath = null;
-  const secDir = getSecondaryBackupDir();
-  if (secDir) {
+  // حفظ نسخة في البارتشن الآمن خارج C: (مثل F:\gym-backups)
+  let safePath = null;
+  const safeDir = getSafePartitionDir();
+  if (safeDir) {
     try {
-      secondaryPath = path.join(secDir, filename);
-      fs.copyFileSync(srcDb, secondaryPath);
+      if (!fs.existsSync(safeDir)) fs.mkdirSync(safeDir, { recursive: true });
+      safePath = path.join(safeDir, filename);
+      fs.copyFileSync(srcDb, safePath);
     } catch (e) {
-      console.warn('Failed secondary backup:', e.message);
+      console.warn('Failed safe partition backup:', e.message);
     }
   }
 
-  cleanupOldBackups(BACKUP_DIR, 30);
-  if (secDir) cleanupOldBackups(secDir, 30);
+  // حفظ نسخة إضافية على بارتشن A: (A:\gym-backups) لزيادة الأمان والتكرار
+  const aDir = 'A:\\gym-backups';
+  if (safeDir && !safeDir.toUpperCase().startsWith('A:')) {
+    try {
+      if (!fs.existsSync(aDir)) fs.mkdirSync(aDir, { recursive: true });
+      fs.copyFileSync(srcDb, path.join(aDir, filename));
+    } catch (e) {}
+  }
+
+  cleanupOldBackups(BACKUP_DIR, 60);
+  if (safeDir) cleanupOldBackups(safeDir, 60);
+  if (fs.existsSync(aDir)) cleanupOldBackups(aDir, 60);
 
   return {
     filename,
     primary: destPrimary,
-    secondary: secondaryPath,
+    safeDir: safePath,
     size: fs.statSync(destPrimary).size,
   };
 }
@@ -1338,28 +1351,26 @@ function createLocalBackup(prefix = 'gym-backup') {
 let lastAutoBackupDay = '';
 function checkAndRunAutoBackup() {
   const today = todayStr();
-  if (lastAutoBackupDay !== today) {
-    try {
-      createLocalBackup('gym-auto-backup');
+  try {
+    const todayFile = path.join(BACKUP_DIR, `gym-backup-${today}.db`);
+    if (lastAutoBackupDay !== today || !fs.existsSync(todayFile)) {
+      const res = createLocalBackup('gym-backup');
       lastAutoBackupDay = today;
-      console.log(`[Backup] تم إنشاء نسخة احتياطية تلقائية ليوم ${today}`);
-    } catch (e) {
-      console.error('[Backup Error]:', e.message);
+      console.log(`[Backup] تم إنشاء وتحديث النسخة الاحتياطية على البارتشن الآمن ليوم ${today}: ${res.filename}`);
     }
+  } catch (e) {
+    console.error('[Backup Error]:', e.message);
   }
 }
 
-// تنزيل ملف قاعدة البيانات الحالي مباشرة (للحفظ على فلاشة أو هاتف)
+// تنزيل ملف قاعدة البيانات الحالي مباشرة (للحفظ على فلاشة أو هاتف) باسم تاريخ اليوم
 route('GET', '/api/backup/download', 'admin', () => {
   db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
   const srcDb = path.join(DATA_DIR, 'gym.db');
   const buf = fs.readFileSync(srcDb);
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-CA', { timeZone: TZ });
-  const timeStr = now
-    .toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })
-    .replace(':', '-');
-  const filename = `gym-backup-${dateStr}_${timeStr}.db`;
+  const filename = `gym-backup-${dateStr}.db`;
 
   return {
     raw: buf,
@@ -1373,17 +1384,32 @@ route('GET', '/api/backup/download', 'admin', () => {
 
 // أخذ نسخة احتياطية وحفظها محلياً الآن
 route('POST', '/api/backup/now', 'admin', () => {
-  const res = createLocalBackup('gym-manual-backup');
+  const res = createLocalBackup('gym-backup');
   return {
     ok: true,
-    message: 'تم عمل نسخة احتياطية بنجاح',
+    message: 'تم عمل نسخة احتياطية بنجاح وحفظها في البارتشن الآمن باسم تاريخ اليوم',
     ...res,
   };
 });
 
+// تحديد وتخصيص مسار البارتشن الآمن للنسخ الاحتياطي
+route('POST', '/api/backup/set-dir', 'admin', (ctx) => {
+  const customDir = cleanStr(ctx.body.dir || '', 300, 'مسار البارتشن');
+  if (customDir && !fs.existsSync(customDir)) {
+    try {
+      fs.mkdirSync(customDir, { recursive: true });
+    } catch (e) {
+      throw new ApiError(400, 'تعذر إنشاء أو الوصول للمجلد: ' + e.message);
+    }
+  }
+  setSetting('backup_external_dir', customDir);
+  logAudit('update_backup_dir', ctx.session?.role || 'admin', `تحديث مسار البارتشن الآمن إلى: ${customDir || 'الافتراضي'}`);
+  return { ok: true, message: 'تم حفظ وتحديث مسار البارتشن الآمن بنجاح' };
+});
+
 // حالة النسخ الاحتياطي وسجل النسخ الموجودة
 route('GET', '/api/backup/status', 'admin', () => {
-  const secDir = getSecondaryBackupDir();
+  const safeDir = getSafePartitionDir();
   let files = [];
   try {
     files = fs
@@ -1409,7 +1435,7 @@ route('GET', '/api/backup/status', 'admin', () => {
 
   return {
     primaryDir: BACKUP_DIR,
-    secondaryDir: secDir,
+    safeDir: safeDir,
     currentDbSize,
     recentBackups: files,
     lastBackup: files[0] || null,
@@ -1423,32 +1449,47 @@ route('POST', '/api/backup/restore', 'admin', (ctx) => {
     throw new ApiError(400, 'الملف المرفوع فارغ أو غير صحيح');
   }
 
-  const header = buf.slice(0, 16).toString('utf8');
-  if (!header.startsWith('SQLite format 3')) {
-    throw new ApiError(400, 'الملف المرفوع ليس قاعدة بيانات SQLite صحيحة');
+  try {
+    const { safetyCopy } = restoreDatabase(buf);
+    logAudit(
+      'backup_restored',
+      ctx.session?.role || 'admin',
+      `استرجاع قاعدة البيانات من ملف مرفوع (${Math.round(buf.length / 1024)} كيلوبايت)`
+    );
+    return {
+      ok: true,
+      message: 'تم استرجاع قاعدة البيانات بنجاح! تم حفظ البيانات وتحديث السيستم.',
+    };
+  } catch (err) {
+    throw new ApiError(400, err.message || 'فشل استرجاع قاعدة البيانات');
+  }
+});
+
+// استرجاع نسخة احتياطية سابقة من قائمة النسخ المحفوظة محلياً
+route('POST', '/api/backup/restore-saved', 'admin', (ctx) => {
+  const filename = cleanStr(ctx.body.filename || '', 200, 'اسم الملف');
+  if (!filename || !filename.endsWith('.db') || filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    throw new ApiError(400, 'اسم الملف غير صالح');
+  }
+  const filePath = path.join(BACKUP_DIR, filename);
+  if (!fs.existsSync(filePath)) {
+    throw new ApiError(404, 'ملف النسخة الاحتياطية غير موجود');
   }
 
-  const curDbPath = path.join(DATA_DIR, 'gym.db');
-  const safetyCopy = path.join(DATA_DIR, `gym.db.safety-${Date.now()}`);
-  if (fs.existsSync(curDbPath)) {
-    try {
-      db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-      fs.copyFileSync(curDbPath, safetyCopy);
-    } catch {
-      /* ignore */
-    }
+  try {
+    const { safetyCopy } = restoreDatabase(filePath);
+    logAudit(
+      'backup_restored',
+      ctx.session?.role || 'admin',
+      `استرجاع قاعدة البيانات من النسخة المحفوظة: ${filename}`
+    );
+    return {
+      ok: true,
+      message: `تم استرجاع النسخة الاحتياطية (${filename}) بنجاح وتحديث السيستم.`,
+    };
+  } catch (err) {
+    throw new ApiError(400, err.message || 'فشل استرجاع قاعدة البيانات');
   }
-
-  fs.writeFileSync(curDbPath, buf);
-
-  // حذف ملفات WAL القديمة
-  try { if (fs.existsSync(curDbPath + '-wal')) fs.unlinkSync(curDbPath + '-wal'); } catch {}
-  try { if (fs.existsSync(curDbPath + '-shm')) fs.unlinkSync(curDbPath + '-shm'); } catch {}
-
-  return {
-    ok: true,
-    message: 'تم استرجاع قاعدة البيانات بنجاح! تم حفظ البيانات وتحديث السيستم.',
-  };
 });
 
 
@@ -1751,16 +1792,16 @@ const server = http.createServer(async (req, res) => {
 if (require.main === module) {
   server.listen(PORT, HOST, () => {
     console.log(`السيستم شغال على http://localhost:${PORT}`);
-    if (getStaffPassword() === 'staff123') {
+    if (isDefaultPassword(getStaffPassword(), 'staff123')) {
       console.log('ملاحظة: كلمة مرور الموظف الافتراضية هي staff123 (يمكن تغييرها من شاشة الإعدادات).');
     }
-    if (getAdminPassword() === 'admin123') {
+    if (isDefaultPassword(getAdminPassword(), 'admin123')) {
       console.log('ملاحظة: كلمة مرور المدير الافتراضية هي admin123 (يمكن تغييرها من شاشة الإعدادات).');
     }
     // تشغيل النسخ الاحتياطي التلقائي عند بدء السيرفر وفحصه دورياً
     try {
       checkAndRunAutoBackup();
-      setInterval(checkAndRunAutoBackup, 6 * 3600 * 1000);
+      setInterval(checkAndRunAutoBackup, 30 * 60 * 1000); // فحص وتحديث تلقائي كل 30 دقيقة
     } catch (e) {
       console.error('[Backup Init Error]:', e.message);
     }

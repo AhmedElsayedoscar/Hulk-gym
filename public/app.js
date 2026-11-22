@@ -2581,6 +2581,7 @@ async function pageSettings() {
           const res = await fetch('/api/backup/restore', {
             method: 'POST',
             headers: { 'Content-Type': 'application/octet-stream' },
+            credentials: 'same-origin',
             body: buf,
           });
           const data = await res.json();
@@ -2595,23 +2596,44 @@ async function pageSettings() {
       };
 
       const backupsTable = status.recentBackups && status.recentBackups.length
-        ? h('div', { class: 'table-wrap', style: 'margin-top:14px;max-height:220px;overflow-y:auto;' },
+        ? h('div', { class: 'table-wrap', style: 'margin-top:14px;max-height:280px;overflow-y:auto;' },
             h('table', null,
               h('thead', null,
                 h('tr', null,
                   h('th', null, 'اسم النسخة'),
                   h('th', null, 'الحجم'),
-                  h('th', null, 'تاريخ ووقت الحفظ')
+                  h('th', null, 'تاريخ ووقت الحفظ'),
+                  h('th', { style: 'text-align:center' }, 'إجراء')
                 )
               ),
               h('tbody', null,
-                status.recentBackups.map(b =>
-                  h('tr', null,
+                status.recentBackups.map(b => {
+                  const restoreSavedBtn = h('button', {
+                    class: 'btn small danger',
+                    style: 'font-size:0.8rem;padding:4px 10px;',
+                    onclick: async () => {
+                      if (!confirm(`⚠️ تأكيد استرجاع النسخة المحفوظة:\n\n(${b.name})\n\nسيتم استبدال البيانات الحالية ببيانات هذه النسخة، هل تريد المتابعة؟`)) return;
+                      restoreSavedBtn.disabled = true;
+                      toast('جاري استرجاع النسخة الاحتياطية...');
+                      try {
+                        const res = await api('POST', '/api/backup/restore-saved', { filename: b.name });
+                        alert('✅ ' + (res.message || 'تم استرجاع قاعدة البيانات بنجاح!'));
+                        location.reload();
+                      } catch (err) {
+                        alert('❌ ' + err.message);
+                      } finally {
+                        restoreSavedBtn.disabled = false;
+                      }
+                    }
+                  }, '🔄 استرجاع هذه النسخة');
+
+                  return h('tr', null,
                     h('td', { class: 'mono', style: 'color:#ffd778;font-size:0.88rem' }, b.name),
                     h('td', null, Math.round(b.size / 1024) + ' كيلوبايت'),
-                    h('td', { class: 'muted', style: 'font-size:0.85rem' }, fmtDateTime(b.mtime))
-                  )
-                )
+                    h('td', { class: 'muted', style: 'font-size:0.85rem' }, fmtDateTime(b.mtime)),
+                    h('td', { style: 'text-align:center' }, restoreSavedBtn)
+                  );
+                })
               )
             )
           )
@@ -2631,10 +2653,10 @@ async function pageSettings() {
           restoreInput
         ),
         h('div', { style: 'background:rgba(20,24,35,0.7);border:1px solid rgba(229,169,60,0.2);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.9rem;' },
-          h('div', { style: 'margin-bottom:6px' }, h('b', { style: 'color:#cbd5e1' }, '📁 مسار النسخ التلقائي: '), h('code', { class: 'mono', style: 'color:#ffd778' }, status.primaryDir)),
-          status.secondaryDir
-            ? h('div', null, h('b', { style: 'color:#4ade80' }, '🛡️ مسار الحماية الإضافي (بارتشن آمن): '), h('code', { class: 'mono', style: 'color:#4ade80' }, status.secondaryDir))
-            : ''
+          status.safeDir
+            ? h('div', { style: 'margin-bottom:6px' }, h('b', { style: 'color:#4ade80' }, '🛡️ مسار الحفظ في البارتشن الآمن (خارج C تماماً): '), h('code', { class: 'mono', style: 'color:#4ade80' }, status.safeDir))
+            : '',
+          h('div', null, h('b', { style: 'color:#cbd5e1' }, '📁 مسار النسخ الاحتياطي الداخلي للنظام: '), h('code', { class: 'mono', style: 'color:#ffd778' }, status.primaryDir))
         ),
         h('h3', { style: 'font-size:0.95rem;margin:14px 0 6px;' }, '🕒 آخر النسخ الاحتياطية المحفوظة تلقائياً:'),
         backupsTable
