@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const app = document.getElementById('app');
 let ME = { role: 'staff', gymName: '' };
@@ -1424,15 +1424,7 @@ async function pageDailyReport(query) {
       h(
         'div',
         { class: 'actions' },
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'btn primary',
-            onclick: () => window.print(),
-          },
-          '🖨️ طباعة تقرير الوردية'
-        ),
+        h('a', { class: 'btn primary', href: `/api/reports/daily.pdf?date=${encodeURIComponent(selectedDate)}`, target: '_blank', download: '', onclick: (e) => { e.currentTarget.href = `/api/reports/daily.pdf?date=${encodeURIComponent(selectedDate)}`; } }, '📥 تنزيل التقرير PDF'),
         h(
           'button',
           {
@@ -1864,7 +1856,7 @@ async function pageMonthlyReport(query) {
       h(
         'div',
         { class: 'actions' },
-        h('button', { type: 'button', class: 'btn primary', onclick: () => window.print() }, '🖨️ طباعة التقفيل الشهري'),
+        h('a', { class: 'btn primary', href: `/api/reports/monthly.pdf?month=${encodeURIComponent(selectedMonth)}`, target: '_blank', download: '', onclick: (e) => { e.currentTarget.href = `/api/reports/monthly.pdf?month=${encodeURIComponent(selectedMonth)}`; } }, '📥 تنزيل التقرير PDF'),
         h('button', { type: 'button', class: 'btn', onclick: () => setMonth(selectedMonth) }, '🔄 تحديث')
       )
     ),

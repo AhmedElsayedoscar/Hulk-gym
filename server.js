@@ -448,13 +448,17 @@ route('GET', '/api/stats', 'staff', () => {
   }
   expiringList.sort((a, b) => a.days_left - b.days_left);
   const todayCount = db
-    .prepare(`SELECT COUNT(DISTINCT member_id) AS c FROM attendance WHERE day = ? AND result = 'ok'`)
+    .prepare(`SELECT COUNT(DISTINCT a.member_id) AS c FROM attendance a JOIN members m ON m.id = a.member_id WHERE a.day = ? AND a.result = 'ok' AND COALESCE(a.archived, 0) = 0 AND m.active != -1`)
     .get(today).c;
-  const deniedToday = db.prepare(`SELECT COUNT(*) AS c FROM attendance WHERE day = ? AND result = 'denied'`).get(today).c;
+  const deniedToday = db
+    .prepare(`SELECT COUNT(*) AS c FROM attendance a JOIN members m ON m.id = a.member_id WHERE a.day = ? AND a.result = 'denied' AND COALESCE(a.archived, 0) = 0 AND m.active != -1`)
+    .get(today).c;
   const recent = db
     .prepare(
       `SELECT a.id, a.checkin_at, a.result, a.reason, m.id AS member_id, m.name
-       FROM attendance a JOIN members m ON m.id = a.member_id ORDER BY a.id DESC LIMIT 8`
+       FROM attendance a JOIN members m ON m.id = a.member_id
+       WHERE COALESCE(a.archived, 0) = 0 AND m.active != -1
+       ORDER BY a.id DESC LIMIT 8`
     )
     .all();
   return {
@@ -632,7 +636,7 @@ route('POST', '/api/members', 'staff', (ctx) => {
 route('GET', '/api/members/:id', 'staff', (ctx) => {
   const id = intParam(ctx.params.id);
   const m = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
-  if (!m) throw new ApiError(404, 'العضو غير موجود');
+  if (!m || m.active === -1) throw new ApiError(404, 'العضو غير موجود');
   const subs = db.prepare('SELECT * FROM subscriptions WHERE member_id = ? ORDER BY start_date DESC, id DESC').all(id);
   const att = db
     .prepare('SELECT id, checkin_at, result, reason FROM attendance WHERE member_id = ? ORDER BY id DESC LIMIT 30')
@@ -647,7 +651,7 @@ route('GET', '/api/members/:id', 'staff', (ctx) => {
 route('PUT', '/api/members/:id', 'staff', (ctx) => {
   const id = intParam(ctx.params.id);
   const m = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
-  if (!m) throw new ApiError(404, 'العضو غير موجود');
+  if (!m || m.active === -1) throw new ApiError(404, 'العضو غير موجود');
   const name = cleanStr(ctx.body.name ?? m.name, 100, 'الاسم', true);
   const phone = toEnglishDigits(cleanStr(ctx.body.phone ?? m.phone, 30, 'رقم الموبايل'));
   const age = ctx.body.age === undefined ? m.age : parseMemberAge(ctx.body.age);
@@ -735,6 +739,7 @@ route('GET', '/api/private-trainings', 'staff', (ctx) => {
     SELECT pt.*, m.name AS member_name, m.code AS member_code, m.phone AS member_phone
     FROM private_trainings pt
     JOIN members m ON pt.member_id = m.id
+    WHERE m.active != -1
     ORDER BY pt.id DESC
   `).all();
 
@@ -889,7 +894,7 @@ route('GET', '/api/public/card/:ident', null, (ctx) => {
   // منع تخمين المعرفات المتسلسلة (Enumeration attack) للعامة عبر حصر البحث بالكود فقط
   const isAuth = !!ctx.session;
   const m = findMemberByIdent(ctx.params.ident, isAuth);
-  if (!m) throw new ApiError(404, 'العضو غير موجود');
+  if (!m || m.active === -1) throw new ApiError(404, 'العضو غير موجود');
   const today = todayStr();
   const sub = subscriptionState(m.id, today);
   return {
@@ -969,6 +974,7 @@ route('GET', '/api/attendance', 'staff', (ctx) => {
   }
 
   const includeArchived = ctx.url.searchParams.get('archived') === '1';
+  conditions.push('m.active != -1');
   if (!includeArchived) {
     conditions.push('COALESCE(a.archived, 0) = 0');
   }
@@ -1100,9 +1106,7 @@ route('POST', '/api/expenses', 'staff', (ctx) => {
 });
 
 // ---------- تقرير الوردية / التقرير اليومي للاشتراكات والتجديدات ----------
-route('GET', '/api/reports/daily', 'admin', (ctx) => {
-  const dateParam = ctx.url.searchParams.get('date');
-  const targetDate = dateParam ? String(dateParam).trim() : todayStr();
+function buildDailyReport(targetDate) {
   if (!validDate(targetDate)) {
     throw new ApiError(400, 'التاريخ غير صحيح');
   }
@@ -1121,7 +1125,7 @@ route('GET', '/api/reports/daily', 'admin', (ctx) => {
               ) AS prev_subs_count
        FROM subscriptions s
        JOIN members m ON m.id = s.member_id
-       WHERE s.created_at >= ? AND s.created_at < ?
+       WHERE m.active != -1 AND s.created_at >= ? AND s.created_at < ?
        ORDER BY s.created_at DESC, s.id DESC`
     )
     .all(windowStart, windowEnd);
@@ -1177,7 +1181,7 @@ route('GET', '/api/reports/daily', 'admin', (ctx) => {
 
   // عدد الحضور في هذا اليوم
   const attendanceCount = db
-    .prepare(`SELECT COUNT(DISTINCT member_id) AS c FROM attendance WHERE day = ? AND result = 'ok'`)
+    .prepare(`SELECT COUNT(DISTINCT a.member_id) AS c FROM attendance a JOIN members m ON m.id = a.member_id WHERE a.day = ? AND a.result = 'ok' AND COALESCE(a.archived, 0) = 0 AND m.active != -1`)
     .get(targetDate).c;
 
   // جلب ملخص آخر 14 يوم لسرعة التنقل وسجل الأيام السابقة
@@ -1188,7 +1192,7 @@ route('GET', '/api/reports/daily', 'admin', (ctx) => {
     recentMap[d] = { date: d, count: 0, revenue: 0 };
   }
   const subRecent = db
-    .prepare(`SELECT price, status, created_at FROM subscriptions WHERE created_at >= ?`)
+    .prepare(`SELECT s.price, s.status, s.created_at FROM subscriptions s JOIN members m ON m.id = s.member_id WHERE m.active != -1 AND s.created_at >= ?`)
     .all(addDays(today, -16));
 
   for (const s of subRecent) {
@@ -1228,6 +1232,12 @@ route('GET', '/api/reports/daily', 'admin', (ctx) => {
     expensesList: expensesRows.map((r) => ({ ...r, time: formatTimeInZone(r.created_at) })),
     list,
   };
+}
+
+route('GET', '/api/reports/daily', 'admin', (ctx) => {
+  const dateParam = ctx.url.searchParams.get('date');
+  const targetDate = dateParam ? String(dateParam).trim() : todayStr();
+  return buildDailyReport(targetDate);
 });
 
 // ---------- التقفيل الشهري للإيرادات (للمدير) ----------
@@ -1237,10 +1247,8 @@ function shiftMonthStr(ym, delta) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-route('GET', '/api/reports/monthly', 'admin', (ctx) => {
-  const monthParam = ctx.url.searchParams.get('month');
+function buildMonthlyReport(targetMonth) {
   const currentMonth = todayStr().slice(0, 7);
-  const targetMonth = monthParam ? String(monthParam).trim() : currentMonth;
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(targetMonth)) {
     throw new ApiError(400, 'الشهر غير صحيح');
   }
@@ -1260,7 +1268,7 @@ route('GET', '/api/reports/monthly', 'admin', (ctx) => {
               ) AS prev_subs_count
        FROM subscriptions s
        JOIN members m ON m.id = s.member_id
-       WHERE s.created_at >= ? AND s.created_at < ?
+       WHERE m.active != -1 AND s.created_at >= ? AND s.created_at < ?
        ORDER BY s.created_at DESC, s.id DESC`
     )
     .all(windowStart, windowEnd);
@@ -1271,7 +1279,7 @@ route('GET', '/api/reports/monthly', 'admin', (ctx) => {
               m.name AS member_name, m.phone AS member_phone, m.code AS member_code
        FROM private_trainings p
        JOIN members m ON m.id = p.member_id
-       WHERE p.created_at >= ? AND p.created_at < ?
+       WHERE m.active != -1 AND p.created_at >= ? AND p.created_at < ?
        ORDER BY p.created_at DESC, p.id DESC`
     )
     .all(windowStart, windowEnd);
@@ -1405,7 +1413,7 @@ route('GET', '/api/reports/monthly', 'admin', (ctx) => {
   const netAfterSalaries = netAfterExpenses - totalSalaries;
 
   const attendanceCount = db
-    .prepare(`SELECT COUNT(*) AS c FROM attendance WHERE day >= ? AND day < ? AND result = 'ok'`)
+    .prepare(`SELECT COUNT(*) AS c FROM attendance a JOIN members m ON m.id = a.member_id WHERE a.day >= ? AND a.day < ? AND a.result = 'ok' AND COALESCE(a.archived, 0) = 0 AND m.active != -1`)
     .get(monthStart, nextMonthStart).c;
 
   const dailyBreakdown = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
@@ -1419,7 +1427,7 @@ route('GET', '/api/reports/monthly', 'admin', (ctx) => {
   }
   const oldestMonthStart = `${shiftMonthStr(currentMonth, -11)}-01`;
   const oldestWindow = addDays(oldestMonthStart, -1);
-  for (const s of db.prepare(`SELECT price, status, created_at FROM subscriptions WHERE created_at >= ?`).all(oldestWindow)) {
+  for (const s of db.prepare(`SELECT s.price, s.status, s.created_at FROM subscriptions s JOIN members m ON m.id = s.member_id WHERE m.active != -1 AND s.created_at >= ?`).all(oldestWindow)) {
     if (s.status === 'cancelled') continue;
     const m = new Date(s.created_at).toLocaleDateString('en-CA', { timeZone: TZ }).slice(0, 7);
     if (recentMonthsMap[m]) {
@@ -1427,7 +1435,7 @@ route('GET', '/api/reports/monthly', 'admin', (ctx) => {
       recentMonthsMap[m].revenue += Number(s.price) || 0;
     }
   }
-  for (const p of db.prepare(`SELECT price, status, created_at FROM private_trainings WHERE created_at >= ?`).all(oldestWindow)) {
+  for (const p of db.prepare(`SELECT p.price, p.status, p.created_at FROM private_trainings p JOIN members m ON m.id = p.member_id WHERE m.active != -1 AND p.created_at >= ?`).all(oldestWindow)) {
     if (p.status === 'cancelled') continue;
     const m = new Date(p.created_at).toLocaleDateString('en-CA', { timeZone: TZ }).slice(0, 7);
     if (recentMonthsMap[m]) {
@@ -1475,6 +1483,13 @@ route('GET', '/api/reports/monthly', 'admin', (ctx) => {
     expensesList: expensesRows.map((r) => ({ ...r, time: formatTimeInZone(r.created_at) })),
     list,
   };
+}
+
+route('GET', '/api/reports/monthly', 'admin', (ctx) => {
+  const monthParam = ctx.url.searchParams.get('month');
+  const currentMonth = todayStr().slice(0, 7);
+  const targetMonth = monthParam ? String(monthParam).trim() : currentMonth;
+  return buildMonthlyReport(targetMonth);
 });
 
 // ---------- إعدادات النظام وتنبيهات الواتساب ----------
@@ -1841,7 +1856,7 @@ route('GET', '/api/export/members.pdf', 'staff', (ctx) => {
 
   const gymName = getSetting('gym_name', 'Hulk Gym');
   const today = todayStr();
-  const rows = db.prepare('SELECT * FROM members ORDER BY id ASC').all();
+  const rows = db.prepare('SELECT * FROM members WHERE active != -1 ORDER BY id ASC').all();
   const list = rows.map((m) => {
     const view = memberView(m, today);
     const attCount = db.prepare("SELECT COUNT(*) AS c FROM attendance WHERE member_id = ? AND result = 'ok' AND COALESCE(archived, 0) = 0").get(m.id).c;
@@ -1960,11 +1975,19 @@ route('GET', '/api/export/members.pdf', 'staff', (ctx) => {
 </body>
 </html>`;
 
+  return renderHtmlToPdf(html, `hulk-gym-members-${today}.pdf`, ctx, 'export_members_pdf', `تصدير ملف PDF لعدد ${list.length} عضو`);
+});
+
+function renderHtmlToPdf(html, filename, ctx, auditAction, auditDetails) {
+  const browserPath = findPdfBrowser();
+  if (!browserPath) {
+    throw new ApiError(500, 'تعذر العثور على Microsoft Edge أو Chrome لتوليد ملف PDF');
+  }
   const os = require('os');
   const { execFileSync } = require('child_process');
   const stamp = Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-  const tmpHtml = path.join(os.tmpdir(), `hulk-members-${stamp}.html`);
-  const tmpPdf = path.join(os.tmpdir(), `hulk-members-${stamp}.pdf`);
+  const tmpHtml = path.join(os.tmpdir(), `hulk-pdf-${stamp}.html`);
+  const tmpPdf = path.join(os.tmpdir(), `hulk-pdf-${stamp}.pdf`);
   const tmpProfile = path.join(os.tmpdir(), `hulk-edge-${stamp}`);
 
   try {
@@ -1987,12 +2010,14 @@ route('GET', '/api/export/members.pdf', 'staff', (ctx) => {
       throw new Error('لم يتم توليد ملف PDF');
     }
     const pdfBuf = fs.readFileSync(tmpPdf);
-    logAudit('export_members_pdf', ctx.session?.role || 'staff', `تصدير ملف PDF لعدد ${list.length} عضو`, ctx.ip);
+    if (auditAction) {
+      logAudit(auditAction, ctx.session?.role || 'admin', auditDetails || filename, ctx.ip);
+    }
     return {
       raw: pdfBuf,
       type: 'application/pdf',
       headers: {
-        'Content-Disposition': `attachment; filename="hulk-gym-members-${today}.pdf"`,
+        'Content-Disposition': `attachment; filename="${filename}"`,
         'Content-Length': Buffer.byteLength(pdfBuf),
       },
     };
@@ -2001,6 +2026,203 @@ route('GET', '/api/export/members.pdf', 'staff', (ctx) => {
     try { if (fs.existsSync(tmpPdf)) fs.unlinkSync(tmpPdf); } catch {}
     try { if (fs.existsSync(tmpProfile)) fs.rmSync(tmpProfile, { recursive: true, force: true }); } catch {}
   }
+}
+
+route('GET', '/api/reports/daily.pdf', 'admin', (ctx) => {
+  const dateParam = ctx.url.searchParams.get('date');
+  const targetDate = dateParam ? String(dateParam).trim() : todayStr();
+  const data = buildDailyReport(targetDate);
+  const gymName = getSetting('gym_name', data.gymName || 'Hulk Gym');
+
+  const subRows = data.list.map((r, i) => `
+    <tr>
+      <td class="center">${i + 1}</td>
+      <td class="mono center">${escHtml(r.time)}</td>
+      <td class="mono center">${escHtml(r.member_code)}</td>
+      <td class="bold">${escHtml(r.member_name)}</td>
+      <td>${escHtml(r.plan_name)}</td>
+      <td class="center">${escHtml(r.status === 'cancelled' ? 'ملغي' : r.type_label)}</td>
+      <td class="mono center">${escHtml(r.start_date)} → ${escHtml(r.end_date)}</td>
+      <td class="center bold">${Number(r.price || 0).toFixed(0)} ج.م</td>
+    </tr>
+  `).join('');
+
+  const expRows = data.expensesList.map((e, i) => `
+    <tr>
+      <td class="center">${i + 1}</td>
+      <td class="mono center">${escHtml(e.time)}</td>
+      <td class="bold">${escHtml(e.title)}</td>
+      <td class="center">${escHtml(e.category)}</td>
+      <td>${escHtml(e.recorded_by)}</td>
+      <td class="center bold" style="color:#dc2626">${Number(e.amount || 0).toFixed(0)} ج.م</td>
+    </tr>
+  `).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>التقرير اليومي - ${escHtml(targetDate)}</title>
+<style>
+  @page { size: A4 portrait; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #0f172a; margin: 0; font-size: 11px; }
+  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #16a34a; padding-bottom: 10px; margin-bottom: 12px; }
+  .header h1 { margin: 0; font-size: 18px; color: #15803d; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+  .stat { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; text-align: center; }
+  .stat b { display: block; font-size: 14px; margin-top: 3px; }
+  h2 { font-size: 13px; margin: 14px 0 6px; color: #1e293b; border-right: 3px solid #16a34a; padding-right: 6px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  th { background: #1e293b; color: #fff; padding: 6px; text-align: right; font-size: 10px; border: 1px solid #334155; }
+  td { padding: 5px 6px; border: 1px solid #cbd5e1; font-size: 10px; }
+  tbody tr:nth-child(even) { background: #f8fafc; }
+  .center { text-align: center; }
+  .bold { font-weight: 700; }
+  .mono { font-family: Consolas, monospace; direction: ltr; unicode-bidi: embed; }
+  .sigs { display: flex; justify-content: space-between; margin-top: 26px; padding-top: 12px; border-top: 1px dashed #64748b; font-size: 10.5px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>📊 التقرير اليومي للوردية — ${escHtml(gymName)}</h1>
+      <div style="color:#475569;margin-top:2px;">تاريخ التقرير: <b>${escHtml(targetDate)}</b></div>
+    </div>
+    <div style="font-size:10px;color:#475569;">وقت الإصدار: ${escHtml(new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }))}</div>
+  </div>
+  <div class="stats">
+    <div class="stat">إجمالي الإيراد<b style="color:#16a34a">${data.totalRevenue.toFixed(0)} ج.م</b></div>
+    <div class="stat">المصروفات (${data.expenseCount})<b style="color:#dc2626">${data.totalExpenses.toFixed(0)} ج.م</b></div>
+    <div class="stat">صافي الخزينة<b style="color:#0f172a">${data.netRevenue.toFixed(0)} ج.م</b></div>
+    <div class="stat">الاشتراكات / الحضور<b>${data.totalCount} / ${data.attendanceCount}</b></div>
+  </div>
+  <h2>الاشتراكات والتجديدات (${data.list.length})</h2>
+  <table>
+    <thead><tr><th class="center">#</th><th class="center">الوقت</th><th class="center">الكود</th><th>العضو</th><th>الباقة</th><th class="center">النوع</th><th class="center">الفترة</th><th class="center">المبلغ</th></tr></thead>
+    <tbody>${subRows || '<tr><td colspan="8" class="center">لا توجد اشتراكات مسجلة في هذا اليوم</td></tr>'}</tbody>
+  </table>
+  <h2>المصروفات اليومية (${data.expensesList.length})</h2>
+  <table>
+    <thead><tr><th class="center">#</th><th class="center">الوقت</th><th>البيان</th><th class="center">التصنيف</th><th>المسجل</th><th class="center">المبلغ</th></tr></thead>
+    <tbody>${expRows || '<tr><td colspan="6" class="center">لا توجد مصروفات مسجلة في هذا اليوم</td></tr>'}</tbody>
+  </table>
+  <div class="sigs">
+    <div><b>مسؤول الوردية:</b> ....................</div>
+    <div><b>الإدارة:</b> ....................</div>
+    <div><b>الخزينة المستلمة:</b> ............. ج.م</div>
+  </div>
+</body>
+</html>`;
+
+  return renderHtmlToPdf(html, `daily-report-${targetDate}.pdf`, ctx, 'export_daily_pdf', `تنزيل التقرير اليومي PDF (${targetDate})`);
+});
+
+route('GET', '/api/reports/monthly.pdf', 'admin', (ctx) => {
+  const monthParam = ctx.url.searchParams.get('month');
+  const currentMonth = todayStr().slice(0, 7);
+  const targetMonth = monthParam ? String(monthParam).trim() : currentMonth;
+  const data = buildMonthlyReport(targetMonth);
+  const gymName = getSetting('gym_name', data.gymName || 'Hulk Gym');
+
+  const planRows = (data.planBreakdown || []).map((p, i) => `
+    <tr>
+      <td class="center">${i + 1}</td>
+      <td class="bold">${escHtml(p.name)}</td>
+      <td class="center">${p.count}</td>
+      <td class="center bold">${Number(p.revenue || 0).toFixed(0)} ج.م</td>
+    </tr>
+  `).join('');
+
+  const itemRows = (data.list || []).map((r, i) => `
+    <tr>
+      <td class="center">${i + 1}</td>
+      <td class="mono center">${escHtml(r.date)}</td>
+      <td class="mono center">${escHtml(r.member_code)}</td>
+      <td class="bold">${escHtml(r.member_name)}</td>
+      <td>${escHtml(r.plan_name)}</td>
+      <td class="center">${escHtml(r.type_label)}</td>
+      <td class="center bold">${Number(r.price || 0).toFixed(0)} ج.م</td>
+    </tr>
+  `).join('');
+
+  const expRows = (data.expensesList || []).map((e, i) => `
+    <tr>
+      <td class="center">${i + 1}</td>
+      <td class="mono center">${escHtml(e.expense_date)}</td>
+      <td class="bold">${escHtml(e.title)}</td>
+      <td class="center">${escHtml(e.category)}</td>
+      <td class="center bold" style="color:#dc2626">${Number(e.amount || 0).toFixed(0)} ج.م</td>
+    </tr>
+  `).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>التقفيل الشهري - ${escHtml(targetMonth)}</title>
+<style>
+  @page { size: A4 portrait; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #0f172a; margin: 0; font-size: 11px; }
+  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #16a34a; padding-bottom: 10px; margin-bottom: 12px; }
+  .header h1 { margin: 0; font-size: 18px; color: #15803d; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+  .stat { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; text-align: center; }
+  .stat b { display: block; font-size: 14px; margin-top: 3px; }
+  h2 { font-size: 13px; margin: 14px 0 6px; color: #1e293b; border-right: 3px solid #16a34a; padding-right: 6px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  th { background: #1e293b; color: #fff; padding: 6px; text-align: right; font-size: 10px; border: 1px solid #334155; }
+  td { padding: 5px 6px; border: 1px solid #cbd5e1; font-size: 10px; }
+  tbody tr:nth-child(even) { background: #f8fafc; }
+  .center { text-align: center; }
+  .bold { font-weight: 700; }
+  .mono { font-family: Consolas, monospace; direction: ltr; unicode-bidi: embed; }
+  .sigs { display: flex; justify-content: space-between; margin-top: 26px; padding-top: 12px; border-top: 1px dashed #64748b; font-size: 10.5px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>📅 التقفيل الشهري للإيرادات — ${escHtml(gymName)}</h1>
+      <div style="color:#475569;margin-top:2px;">عن شهر: <b>${escHtml(targetMonth)}</b></div>
+    </div>
+    <div style="font-size:10px;color:#475569;">وقت الإصدار: ${escHtml(new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }))}</div>
+  </div>
+  <div class="stats">
+    <div class="stat">إجمالي الإيرادات<b style="color:#16a34a">${data.totalRevenue.toFixed(0)} ج.م</b></div>
+    <div class="stat">المصروفات (${data.expenseCount})<b style="color:#dc2626">${data.totalExpenses.toFixed(0)} ج.م</b></div>
+    <div class="stat">الرواتب (${data.employeeCount})<b style="color:#d97706">${data.totalSalaries.toFixed(0)} ج.م</b></div>
+    <div class="stat">صافي الربح النهائي<b style="color:#0f172a">${data.netAfterSalaries.toFixed(0)} ج.م</b></div>
+  </div>
+  <h2>توزيع الإيرادات حسب الباقات</h2>
+  <table>
+    <thead><tr><th class="center">#</th><th>الباقة / النوع</th><th class="center">العدد</th><th class="center">الإيراد</th></tr></thead>
+    <tbody>${planRows || '<tr><td colspan="4" class="center">لا توجد بيانات</td></tr>'}</tbody>
+  </table>
+  <h2>سجل الاشتراكات والتدريب الخاص (${data.list.length})</h2>
+  <table>
+    <thead><tr><th class="center">#</th><th class="center">التاريخ</th><th class="center">الكود</th><th>العضو</th><th>الباقة</th><th class="center">النوع</th><th class="center">المبلغ</th></tr></thead>
+    <tbody>${itemRows || '<tr><td colspan="7" class="center">لا توجد حركات مسجلة في هذا الشهر</td></tr>'}</tbody>
+  </table>
+  <h2>المصروفات الشهرية (${data.expensesList.length})</h2>
+  <table>
+    <thead><tr><th class="center">#</th><th class="center">التاريخ</th><th>البيان</th><th class="center">التصنيف</th><th class="center">المبلغ</th></tr></thead>
+    <tbody>${expRows || '<tr><td colspan="5" class="center">لا توجد مصروفات مسجلة في هذا الشهر</td></tr>'}</tbody>
+  </table>
+  <div class="sigs">
+    <div><b>المحاسب / الاستقبال:</b> ....................</div>
+    <div><b>مدير الجيم:</b> ....................</div>
+    <div><b>الصافي المعتمد:</b> ............. ج.م</div>
+  </div>
+</body>
+</html>`;
+
+  return renderHtmlToPdf(html, `monthly-report-${targetMonth}.pdf`, ctx, 'export_monthly_pdf', `تنزيل التقفيل الشهري PDF (${targetMonth})`);
 });
 
 // مراجعة شاملة لسجل العمليات (Audit Trail) مع بحث وفلاتر
@@ -2145,7 +2367,7 @@ route('POST', '/api/backup/restore-saved', 'admin', (ctx) => {
 route('POST', '/api/members/:id/freeze', 'admin', (ctx) => {
   const id = intParam(ctx.params.id);
   const m = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
-  if (!m) throw new ApiError(404, 'العضو غير موجود');
+  if (!m || m.active === -1) throw new ApiError(404, 'العضو غير موجود');
 
   const days = intParam(ctx.body.days);
   if (days < 1 || days > 365) throw new ApiError(400, 'عدد أيام التجميد يجب أن يكون بين 1 و 365');
@@ -2196,7 +2418,7 @@ route('GET', '/api/database/health', 'admin', () => {
   const check = db.prepare('PRAGMA quick_check(1)').get();
   const integrity = check && (check.quick_check === 'ok' || check.integrity_check === 'ok') ? 'ok' : 'warning';
 
-  const memberCount = db.prepare('SELECT COUNT(*) AS c FROM members').get().c;
+  const memberCount = db.prepare('SELECT COUNT(*) AS c FROM members WHERE active != -1').get().c;
   const subCount = db.prepare('SELECT COUNT(*) AS c FROM subscriptions').get().c;
   const attCount = db.prepare('SELECT COUNT(*) AS c FROM attendance').get().c;
   const planCount = db.prepare('SELECT COUNT(*) AS c FROM plans').get().c;
@@ -2252,7 +2474,7 @@ function toCsvRow(arr) {
 
 route('GET', '/api/export/members.csv', 'admin', () => {
   const today = todayStr();
-  const members = db.prepare('SELECT * FROM members ORDER BY id ASC').all();
+  const members = db.prepare('SELECT * FROM members WHERE active != -1 ORDER BY id ASC').all();
   const headers = ['كود العضو', 'الاسم', 'الموبايل', 'الحالة', 'الباقة الحالية', 'تاريخ الانتهاء', 'الأيام المتبقية', 'تاريخ التسجيل', 'ملاحظات'];
   const rows = [toCsvRow(headers)];
 
