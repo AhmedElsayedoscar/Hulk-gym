@@ -39,17 +39,17 @@ End If
 On Error Resume Next
 startupDir = WshShell.SpecialFolders("Startup")
 If fso.FolderExists(startupDir) Then
-    startupLnk = startupDir & "\X GYM.lnk"
+    startupLnk = startupDir & "\Hulk GYM.lnk"
     Set scStartup = WshShell.CreateShortcut(startupLnk)
     scStartup.TargetPath = "wscript.exe"
     scStartup.Arguments = """" & WScript.ScriptFullName & """"
     scStartup.WorkingDirectory = strDir
     iconPath = strDir & "\icon.ico"
     If fso.FileExists(iconPath) Then scStartup.IconLocation = iconPath
-    scStartup.Description = "X GYM - تشغيل تلقائي"
+    scStartup.Description = "Hulk GYM - تشغيل تلقائي"
     scStartup.Save
 End If
-WshShell.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Run\XGYM", "wscript.exe """ & WScript.ScriptFullName & """", "REG_SZ"
+WshShell.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Run\HulkGYM", "wscript.exe """ & WScript.ScriptFullName & """", "REG_SZ"
 On Error Goto 0
 
 ' 4. فتح التطبيق كنافذة مستقلة احترافية (Desktop App Mode)

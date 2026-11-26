@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 // أدوات مشتركة بين كل الصفحات. كل النصوص بتتحط عن طريق textContent عشان نتفادى ثغرات XSS.
 
 const TZ = 'Africa/Cairo';
@@ -161,11 +161,11 @@ function loadCardBgImage() {
       resolve(img);
     };
     img.onerror = () => resolve(null);
-    img.src = '/xgym-logo.jpg';
+    img.src = '/hulkgym-logo.jpg';
   });
 }
 
-// توليد كارت العضوية بدقة عالية كصورة (PNG Blob) بخلفية وثيم X GYM الفاخر
+// توليد كارت العضوية بدقة عالية كصورة (PNG Blob) بخلفية وثيم Hulk GYM الفاخر
 async function renderMemberCardToBlob(m, gymName, barcodeImgElem) {
   const canvas = document.createElement('canvas');
   const w = 1016;
@@ -198,7 +198,7 @@ async function renderMemberCardToBlob(m, gymName, barcodeImgElem) {
   ctx.roundRect(0, 0, w, h, 28);
   ctx.clip();
 
-  // رسم خلفية الصورة الخاصة بـ X GYM
+  // رسم خلفية الصورة الخاصة بـ Hulk GYM
   if (bgImg && bgImg.naturalWidth > 0) {
     const scale = Math.max(w / bgImg.naturalWidth, h / bgImg.naturalHeight);
     const sw = bgImg.naturalWidth * scale;
@@ -222,9 +222,9 @@ async function renderMemberCardToBlob(m, gymName, barcodeImgElem) {
 
   // شريط جانبي ذهبي متدرج
   const sideGrad = ctx.createLinearGradient(0, 0, 0, h);
-  sideGrad.addColorStop(0, '#ffd778');
-  sideGrad.addColorStop(0.5, '#e5a93c');
-  sideGrad.addColorStop(1, '#9a5e0b');
+  sideGrad.addColorStop(0, '#4ade80');
+  sideGrad.addColorStop(0.5, '#22c55e');
+  sideGrad.addColorStop(1, '#15803d');
   ctx.fillStyle = sideGrad;
   ctx.fillRect(0, 0, 85, h);
 
@@ -232,10 +232,10 @@ async function renderMemberCardToBlob(m, gymName, barcodeImgElem) {
 
   // إطار خارجي ذهبي متدرج
   const goldBorder = ctx.createLinearGradient(0, 0, w, h);
-  goldBorder.addColorStop(0, '#ffd778');
-  goldBorder.addColorStop(0.35, '#f5be53');
-  goldBorder.addColorStop(0.7, '#d48f1f');
-  goldBorder.addColorStop(1, '#8e580a');
+  goldBorder.addColorStop(0, '#4ade80');
+  goldBorder.addColorStop(0.35, '#34d399');
+  goldBorder.addColorStop(0.7, '#16a34a');
+  goldBorder.addColorStop(1, '#14532d');
   ctx.strokeStyle = goldBorder;
   ctx.lineWidth = 6;
   ctx.beginPath();
@@ -243,7 +243,7 @@ async function renderMemberCardToBlob(m, gymName, barcodeImgElem) {
   ctx.stroke();
 
   // خط توهج ذهبي داخلي خفيف
-  ctx.strokeStyle = 'rgba(255, 215, 120, 0.25)';
+  ctx.strokeStyle = 'rgba(74, 222, 128, 0.25)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.roundRect(9, 9, w - 18, h - 18, 22);
@@ -254,18 +254,18 @@ async function renderMemberCardToBlob(m, gymName, barcodeImgElem) {
   ctx.textAlign = 'right';
 
   // اسم الجيم بشعار ذهبي فخم
-  ctx.fillStyle = '#ffd778';
+  ctx.fillStyle = '#4ade80';
   ctx.font = '900 38px "Segoe UI", Cairo, Tahoma, Arial, sans-serif';
-  ctx.fillText(gymName || 'X GYM', w - 120, 75);
+  ctx.fillText(gymName || 'Hulk GYM', w - 120, 75);
 
-  ctx.fillStyle = '#e5a93c';
+  ctx.fillStyle = '#22c55e';
   ctx.font = 'bold 16px "Segoe UI", Cairo, Tahoma, Arial, sans-serif';
   ctx.fillText('VIP MEMBERSHIP CARD • كارت عضوية خاص', w - 120, 103);
 
   // خط فاصل ذهبي متدرج
   const lineGrad = ctx.createLinearGradient(w - 120, 0, w - 560, 0);
-  lineGrad.addColorStop(0, '#e5a93c');
-  lineGrad.addColorStop(1, 'rgba(229, 169, 60, 0)');
+  lineGrad.addColorStop(0, '#22c55e');
+  lineGrad.addColorStop(1, 'rgba(34, 197, 94, 0)');
   ctx.strokeStyle = lineGrad;
   ctx.lineWidth = 2.5;
   ctx.beginPath();
@@ -281,11 +281,11 @@ async function renderMemberCardToBlob(m, gymName, barcodeImgElem) {
   ctx.fillText(name, w - 120, 180);
 
   // كود العضوية بأرقام بارزة
-  ctx.fillStyle = '#e5a93c';
+  ctx.fillStyle = '#22c55e';
   ctx.font = 'bold 26px "Segoe UI", Cairo, Tahoma, Arial, sans-serif';
   ctx.fillText('كود العضوية:', w - 120, 245);
 
-  ctx.fillStyle = '#ffd778';
+  ctx.fillStyle = '#4ade80';
   ctx.font = '900 52px Consolas, monospace, sans-serif';
   ctx.fillText(String(m.code || ''), w - 280, 252);
 
@@ -323,7 +323,7 @@ async function renderMemberCardToBlob(m, gymName, barcodeImgElem) {
   ctx.roundRect(boxX, boxY, boxW, boxH, 18);
   ctx.fill();
 
-  ctx.strokeStyle = '#e5a93c';
+  ctx.strokeStyle = '#22c55e';
   ctx.lineWidth = 4;
   ctx.stroke();
 

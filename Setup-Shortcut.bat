@@ -1,10 +1,10 @@
 @echo off
-title X GYM - Setup
+title Hulk GYM - Setup
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\setup-shortcut.ps1"
 if %ERRORLEVEL% EQU 0 (
     echo.
     echo  ======================================================
-    echo   SUCCESS: X GYM shortcut created with icon on Desktop!
+    echo   SUCCESS: Hulk GYM shortcut created with icon on Desktop!
     echo  ======================================================
     echo.
 ) else (

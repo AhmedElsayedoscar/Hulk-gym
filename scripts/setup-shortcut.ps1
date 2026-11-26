@@ -19,7 +19,7 @@ $iconFile = Join-Path $projectDir "icon.ico"
 $sh = New-Object -ComObject Shell.Application
 $desk = $sh.Namespace('shell:Desktop').Self.Path
 
-$localLnk = Join-Path $projectDir "X GYM.lnk"
+$localLnk = Join-Path $projectDir "Hulk GYM.lnk"
 $wsh = New-Object -ComObject WScript.Shell
 $sc = $wsh.CreateShortcut($localLnk)
 $sc.TargetPath = "wscript.exe"
@@ -30,24 +30,24 @@ if (Test-Path $iconFile) {
 } else {
     $sc.IconLocation = "$env:SystemRoot\System32\shell32.dll,43"
 }
-$sc.Description = "X GYM - نظام إدارة الجيم"
+$sc.Description = "Hulk GYM - نظام إدارة الجيم"
 $sc.Save()
 
 # 1. نسخ الاختصار إلى سطح المكتب
-$destLnk = Join-Path $desk "X GYM.lnk"
+$destLnk = Join-Path $desk "Hulk GYM.lnk"
 Copy-Item $localLnk -Destination $destLnk -Force
 
 # 2. نسخ الاختصار إلى بدء التشغيل التلقائي للويندوز (Startup)
 $startupFolder = [Environment]::GetFolderPath('Startup')
 if (Test-Path $startupFolder) {
-    $startupLnk = Join-Path $startupFolder "X GYM.lnk"
+    $startupLnk = Join-Path $startupFolder "Hulk GYM.lnk"
     Copy-Item $localLnk -Destination $startupLnk -Force
 }
 
 Remove-Item $localLnk -Force -ErrorAction SilentlyContinue
 
 if (Test-Path $destLnk) {
-    Write-Host "SUCCESS: X GYM shortcut created on Desktop with icon!" -ForegroundColor Green
+    Write-Host "SUCCESS: Hulk GYM shortcut created on Desktop with icon!" -ForegroundColor Green
     exit 0
 } else {
     Write-Host "Failed to create shortcut." -ForegroundColor Red

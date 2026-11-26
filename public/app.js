@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const app = document.getElementById('app');
 let ME = { role: 'staff', gymName: '' };
@@ -9,7 +9,9 @@ const NAV = [
   ['#/members', 'الأعضاء'],
   ['#/private', '⭐ البرايفت (PT)'],
   ['#/attendance', 'الحضور'],
+  ['#/expenses', '💸 المصروفات'],
   ['#/daily-report', '📊 التقرير اليومي', 'admin'],
+  ['#/monthly-report', '📅 التقفيل الشهري', 'admin'],
   ['#/employees', '👔 الموظفين والمرتبات', 'admin'],
   ['#/plans', 'الباقات', 'admin'],
   ['#/reminders', '🔔 الإشعارات', 'admin'],
@@ -124,7 +126,9 @@ async function pageDashboard() {
       tile('bad', s.expired, 'اشتراكات منتهية', '#/members?status=expired'),
       tile('info', s.todayCount, 'حضور النهارده', '#/attendance'),
       tile('', s.deniedToday, 'محاولات مرفوضة النهارده', '#/attendance'),
-      ME.role === 'admin' ? tile('gold', '📊 تقرير الوردية', 'التقرير اليومي للاشتراكات', '#/daily-report') : ''
+      tile('warn', '💸 المصروفات', 'تسجيل وسجل المصروفات اليومية', '#/expenses'),
+      ME.role === 'admin' ? tile('gold', '📊 تقرير الوردية', 'التقرير اليومي للاشتراكات', '#/daily-report') : '',
+      ME.role === 'admin' ? tile('gold', '📅 التقفيل الشهري', 'إيرادات الشهر والمرتبات', '#/monthly-report') : ''
     ),
     h(
       'div',
@@ -239,17 +243,19 @@ async function addMemberModal() {
     [
       field('الاسم', h('input', { name: 'name', required: true, maxlength: 100 })),
       field('كود العضو (أرقام فقط - اتركه فارغاً للتوليد التلقائي)', h('input', { name: 'code', type: 'text', inputmode: 'numeric', pattern: '[0-9]*', placeholder: 'مثال: 1001 (تلقائي لو تُرك فارغاً)' })),
-      field('رقم الموبايل', h('input', { name: 'phone', type: 'tel', inputmode: 'tel', maxlength: 30, class: 'ltr' })),
+      h('div', { class: 'row' }, field('رقم الموبايل', h('input', { name: 'phone', type: 'tel', inputmode: 'tel', maxlength: 30, class: 'ltr' })), field('السن (اختياري)', h('input', { name: 'age', type: 'number', min: 5, max: 120, placeholder: 'مثال: 25' }))),
       field('الباقة (اختياري)', h('select', { name: 'plan_id' }, h('option', { value: '' }, 'بدون اشتراك دلوقتي'), planOptions(plans))),
       h('div', { class: 'row' }, field('تاريخ البداية', h('input', { name: 'start_date', type: 'date', value: todayLocal() })), field('السعر المدفوع (اختياري)', h('input', { name: 'price', type: 'number', min: 0, step: '0.01', placeholder: 'سعر الباقة' }))),
       field('ملاحظات', h('textarea', { name: 'notes', rows: 2, maxlength: 500 })),
     ],
     async (fd) => {
       const codeVal = fd.get('code')?.trim();
+      const ageVal = fd.get('age')?.trim();
       const r = await api('POST', '/api/members', {
         name: fd.get('name'),
         code: codeVal || undefined,
         phone: fd.get('phone'),
+        age: ageVal ? Number(ageVal) : null,
         notes: fd.get('notes'),
         plan_id: fd.get('plan_id') || null,
         start_date: fd.get('start_date'),
@@ -401,7 +407,7 @@ async function pageMember(id) {
             'div',
             { style: 'display:flex;align-items:center;gap:8px;margin-bottom:6px;' },
             h('span', { style: 'font-size:1.4rem;' }, '⭐'),
-            h('h2', { style: 'margin:0;color:#ffd778;' }, 'اشتراك تدريب خاص (برايفت)'),
+            h('h2', { style: 'margin:0;color:#4ade80;' }, 'اشتراك تدريب خاص (برايفت)'),
             stateBadge
           ),
           h(
@@ -412,7 +418,7 @@ async function pageMember(id) {
             ' • الباقة: ',
             h('b', { style: 'color:#fff;' }, latestPt.package_name),
             ' • المدة: ',
-            h('b', { style: 'color:#ffd778;' }, `${totalDays} يوم`)
+            h('b', { style: 'color:#4ade80;' }, `${totalDays} يوم`)
           )
         ),
         h('div', { style: 'display:flex;gap:8px;align-items:center;' }, editPtBtn, renewPtBtn)
@@ -431,7 +437,7 @@ async function pageMember(id) {
           { class: 'pt-progress-wrap' },
           h('div', {
             class: 'pt-progress-bar',
-            style: `width:${percent}%;background:${latestPt.state === 'expired' ? '#ef4444' : (latestPt.state === 'expiring' ? '#f59e0b' : 'linear-gradient(90deg, #10b981 0%, #34d399 50%, #ffd778 100%)')};`
+            style: `width:${percent}%;background:${latestPt.state === 'expired' ? '#ef4444' : (latestPt.state === 'expiring' ? '#f59e0b' : 'linear-gradient(90deg, #10b981 0%, #34d399 50%, #4ade80 100%)')};`
           })
         )
       ),
@@ -459,7 +465,7 @@ async function pageMember(id) {
         'button',
         {
           class: 'btn',
-          style: 'border-color:rgba(229,169,60,0.6);color:#ffd778;font-weight:bold;',
+          style: 'border-color:rgba(34, 197, 94,0.6);color:#4ade80;font-weight:bold;',
           onclick: () => privateModal({ member_id: m.id, member_name: m.name }, false, refresh),
         },
         '⭐ اشتراك برايفت جديد'
@@ -476,7 +482,7 @@ async function pageMember(id) {
         { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
         backBtn('#/members', 'رجوع للأعضاء'),
         h('h1', { style: 'margin:0;' }, m.name),
-        activePt ? h('span', { class: 'badge ok', style: 'background:linear-gradient(135deg, #ffd778 0%, #e5a93c 100%);color:#0b0c10;font-weight:900;' }, '⭐ VIP Private') : null
+        activePt ? h('span', { class: 'badge ok', style: 'background:linear-gradient(135deg, #4ade80 0%, #22c55e 100%);color:#0b0c10;font-weight:900;' }, '⭐ VIP Private') : null
       )
     ),
     h(
@@ -491,6 +497,7 @@ async function pageMember(id) {
           { class: 'member-info' },
           h('h1', null, m.name, ' ', m.active ? badge(m.sub.state) : badge('inactive', 'موقوف')),
           infoLine('الموبايل', m.phone || '-'),
+          m.age ? infoLine('السن', `${m.age} سنة`) : null,
           infoLine('الباقة الحالية', m.sub.plan_name || '-'),
           infoLine('ينتهي في', m.sub.end_date ? `${ltr(m.sub.end_date)}${m.sub.days_left > 0 ? ` (باقي ${m.sub.days_left} يوم)` : ''}` : '-'),
           infoLine('عدد الزيارات', String(d.totalVisits)),
@@ -516,7 +523,7 @@ async function freezeModal(m, done) {
     [
       h('div', { class: 'muted', style: 'font-size:0.92rem;margin-bottom:14px;line-height:1.7;' },
         'تاريخ انتهاء الاشتراك الحالي: ',
-        h('b', { style: 'color:#ffd778;' }, ltr(m.sub.end_date)),
+        h('b', { style: 'color:#4ade80;' }, ltr(m.sub.end_date)),
         '. سيتم تمديد تاريخ الانتهاء تلقائياً بمقدار عدد أيام التجميد، وتسجيلها في سجل المشترك.'
       ),
       field('عدد أيام التجميد (بالأيام)', h('input', { name: 'days', type: 'number', min: 1, max: 365, value: 7, required: true })),
@@ -562,15 +569,17 @@ function editMemberModal(m, done) {
     [
       field('الاسم', h('input', { name: 'name', required: true, maxlength: 100, value: m.name })),
       field('كود العضو (أرقام فقط)', h('input', { name: 'code', type: 'text', inputmode: 'numeric', pattern: '[0-9]*', value: m.code, required: true })),
-      field('رقم الموبايل', h('input', { name: 'phone', type: 'tel', maxlength: 30, class: 'ltr', value: m.phone })),
+      h('div', { class: 'row' }, field('رقم الموبايل', h('input', { name: 'phone', type: 'tel', maxlength: 30, class: 'ltr', value: m.phone })), field('السن (اختياري)', h('input', { name: 'age', type: 'number', min: 5, max: 120, value: m.age ?? '' }))),
       field('ملاحظات', h('textarea', { name: 'notes', rows: 2, maxlength: 500 }, m.notes)),
       h('div', { class: 'field' }, h('label', null, h('input', { type: 'checkbox', name: 'active', style: 'width:auto;margin-inline-end:8px', checked: m.active }), 'العضوية فعّالة (لو مش فعّالة الدخول بيترفض)')),
     ],
     async (fd) => {
+      const ageVal = fd.get('age')?.trim();
       await api('PUT', `/api/members/${m.id}`, {
         name: fd.get('name'),
         code: fd.get('code')?.trim(),
         phone: fd.get('phone'),
+        age: ageVal ? Number(ageVal) : null,
         notes: fd.get('notes'),
         active: fd.get('active') === 'on',
       });
@@ -583,10 +592,10 @@ function editMemberModal(m, done) {
 function openWhatsAppModal(m) {
   const planInfo = m.sub && m.sub.plan_name ? m.sub.plan_name : 'عضوية عامة';
   const endDate = m.sub && m.sub.end_date ? m.sub.end_date : 'غير محدد';
-  const gym = ME.gymName || 'X GYM';
+  const gym = ME.gymName || 'Hulk GYM';
 
   // رسالة الواتساب بدون رابط لوكال هوست إطلاقاً، ومجهزة لإرسال صورة الكارت
-  const defaultMsg = `مرحباً بك يا ${m.name} في X GYM 
+  const defaultMsg = `مرحباً بك يا ${m.name} في ${gym} 
 
 تم تسجيل عضويتك بنجاح! تفاصيل الاشتراك:
  كود العضوية: ${m.code}
@@ -1055,6 +1064,7 @@ async function pageDailyReport(query) {
   const presetContainer = h('div', { class: 'preset-bar no-print' });
   const summaryBox = h('div', { class: 'tiles' });
   const tableWrap = h('div', { class: 'card table-wrap' });
+  const dailyExpensesCard = h('div', { class: 'card', style: 'margin-top:18px' });
   const historyCard = h('div', { class: 'card no-print', style: 'margin-top:22px' });
 
   // حقول التصفية والبحث في جدول اليوم
@@ -1147,10 +1157,57 @@ async function pageDailyReport(query) {
 
     summaryBox.replaceChildren(
       tile('gold', `${fmtMoney(reportData.totalRevenue)} ج.م`, '💰 إجمالي إيراد اليوم (خزينة الوردية)'),
+      tile('warn', `${fmtMoney(reportData.totalExpenses || 0)} ج.م`, `💸 مصروفات اليوم (${reportData.expenseCount || 0})`),
+      tile((reportData.netRevenue || 0) >= 0 ? 'ok' : 'bad', `${fmtMoney(reportData.netRevenue ?? reportData.totalRevenue)} ج.م`, '✅ صافي الوردية (الإيراد - المصروفات)'),
       tile('info', reportData.totalCount, '🧾 إجمالي حركات الاشتراك'),
       tile('ok', `${reportData.newCount} (${fmtMoney(reportData.newRevenue)} ج.م)`, '🟢 اشتراكات جديدة'),
       tile('', `${reportData.renewCount} (${fmtMoney(reportData.renewRevenue)} ج.م)`, '🔄 تجديد اشتراك'),
       tile('info', `${reportData.attendanceCount} زيارة`, '🏋️‍♂️ حضور الأعضاء اليوم')
+    );
+  }
+
+  function renderDailyExpenses() {
+    if (!reportData) return;
+    const exRows = reportData.expensesList || [];
+    const tbody = h('tbody');
+    if (!exRows.length) {
+      tbody.append(h('tr', null, h('td', { class: 'empty', colspan: 6 }, 'لا توجد مصروفات مسجلة في هذا اليوم')));
+    } else {
+      exRows.forEach((ex, i) => {
+        tbody.append(
+          h(
+            'tr',
+            null,
+            h('td', { class: 'muted mono' }, String(i + 1)),
+            h('td', { class: 'ltr muted' }, ex.time || '-'),
+            h('td', { style: 'font-weight:700' }, ex.title),
+            h('td', null, badge('warn', ex.category)),
+            h('td', { style: 'font-weight:800;color:#f59e0b' }, `${fmtMoney(ex.amount)} ج.م`),
+            h('td', null, ex.recorded_by === 'admin' ? 'مدير' : 'استقبال')
+          )
+        );
+      });
+    }
+    dailyExpensesCard.replaceChildren(
+      h(
+        'div',
+        { style: 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px' },
+        h('h2', { style: 'margin:0;' }, '💸 مصروفات اليوم (تُخصم من إيراد الوردية)'),
+        h('a', { href: '#/expenses', class: 'btn small no-print' }, '+ تسجيل مصروف')
+      ),
+      h(
+        'div',
+        { class: 'table-wrap' },
+        h(
+          'table',
+          null,
+          h('thead', null, h('tr', null, h('th', null, '#'), h('th', null, 'الوقت'), h('th', null, 'البند'), h('th', null, 'التصنيف'), h('th', null, 'المبلغ'), h('th', null, 'بواسطة'))),
+          tbody,
+          exRows.length
+            ? h('tfoot', null, h('tr', { style: 'background:rgba(255,255,255,0.03);font-weight:900;' }, h('td', { colspan: 4, style: 'text-align:left;padding-left:16px;' }, 'إجمالي مصروفات اليوم:'), h('td', { colspan: 2, style: 'color:#f59e0b;font-size:1.1rem;' }, `${fmtMoney(reportData.totalExpenses || 0)} ج.م`)))
+            : null
+        )
+      )
     );
   }
 
@@ -1202,7 +1259,7 @@ async function pageDailyReport(query) {
           },
           h('td', { class: 'muted' }, String(idx + 1)),
           h('td', null, r.time || '-'),
-          h('td', { class: 'mono', style: 'font-weight:bold;color:#ffd778' }, r.member_code),
+          h('td', { class: 'mono', style: 'font-weight:bold;color:#4ade80' }, r.member_code),
           h(
             'td',
             null,
@@ -1238,7 +1295,7 @@ async function pageDailyReport(query) {
           h('td', { class: 'muted', style: 'font-size:0.85rem' }, `${ltr(r.start_date)} إلى ${ltr(r.end_date)}`),
           h(
             'td',
-            { style: 'font-weight:800;color:#ffd778;font-size:1.05rem' },
+            { style: 'font-weight:800;color:#4ade80;font-size:1.05rem' },
             `${fmtMoney(r.price)} ج.م`
           ),
           h('td', null, statusBadge)
@@ -1255,7 +1312,7 @@ async function pageDailyReport(query) {
         { style: 'background:#181c28;border-top:2px solid var(--brand);font-weight:800;font-size:1rem;' },
         h('td', { colspan: 5, style: 'color:#fff;' }, `عدد العمليات المعروضة: ${rows.length}`),
         h('td', { colspan: 3, style: 'text-align:end;color:#cbd5e1;' }, 'إجمالي المبلغ المعروض:'),
-        h('td', { colspan: 2, style: 'color:#ffd778;font-size:1.15rem;' }, `${fmtMoney(totalFilteredCash)} ج.م`)
+        h('td', { colspan: 2, style: 'color:#4ade80;font-size:1.15rem;' }, `${fmtMoney(totalFilteredCash)} ج.م`)
       )
     );
 
@@ -1327,6 +1384,7 @@ async function pageDailyReport(query) {
     renderPresets();
     renderSummary();
     renderTable();
+    renderDailyExpenses();
     renderHistory();
   }
 
@@ -1334,7 +1392,7 @@ async function pageDailyReport(query) {
   const printHeader = h(
     'div',
     { class: 'print-only', style: 'margin-bottom:20px;text-align:center;border-bottom:2px solid #000;padding-bottom:12px' },
-    h('h1', { style: 'margin:0 0 6px 0;font-size:1.8rem;color:#000' }, `${ME.gymName || 'X GYM'} — تقرير إيراد الوردية اليومي`),
+    h('h1', { style: 'margin:0 0 6px 0;font-size:1.8rem;color:#000' }, `${ME.gymName || 'Hulk GYM'} — تقرير إيراد الوردية اليومي`),
     h('div', { style: 'font-size:1.1rem;font-weight:bold;color:#333' }, `تاريخ اليوم: ${selectedDate} (${fmtDayArabic(selectedDate)})`),
     h('div', { style: 'font-size:0.9rem;color:#666;margin-top:4px' }, `وقت استخراج التقرير: ${new Date().toLocaleString('ar-EG', { timeZone: TZ })}`)
   );
@@ -1404,11 +1462,678 @@ async function pageDailyReport(query) {
       typeSelect
     ),
     tableWrap,
+    dailyExpensesCard,
     printSignatures,
     historyCard
   );
 
   await load(selectedDate);
+}
+
+// ---------- التقفيل الشهري للإيرادات (للمدير) ----------
+function shiftMonth(ym, delta) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function fmtMonthArabic(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  return d.toLocaleDateString('ar-EG', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+async function pageMonthlyReport(query) {
+  if (ME.role !== 'admin') {
+    app.replaceChildren(h('div', { class: 'alert bad' }, 'الصفحة دي للمدير فقط'));
+    return;
+  }
+
+  const params = new URLSearchParams(query);
+  const currentMonth = todayLocal().slice(0, 7);
+  let selectedMonth = params.get('month') || currentMonth;
+  let q = '';
+  let typeFilter = 'all'; // all, new, renew, pt
+  let reportData = null;
+
+  const monthDisplay = h('span', { class: 'muted', style: 'font-weight:700;font-size:1.05rem' });
+  const printMonthLabel = h('div', { style: 'font-size:1.1rem;font-weight:bold;color:#333' });
+  const monthInput = h('input', {
+    type: 'month',
+    value: selectedMonth,
+    style: 'max-width:170px;font-weight:700',
+    onchange: (e) => {
+      if (e.target.value) setMonth(e.target.value);
+    },
+  });
+
+  const presetContainer = h('div', { class: 'preset-bar no-print' });
+  const summaryBox = h('div', { class: 'tiles' });
+  const breakdownGrid = h('div', { class: 'grid-2', style: 'margin-top:20px' });
+  const tableWrap = h('div', { class: 'card table-wrap' });
+  const monthlyExpensesCard = h('div', { class: 'card', style: 'margin-top:20px' });
+  const historyCard = h('div', { class: 'card no-print', style: 'margin-top:22px' });
+
+  const searchInput = h('input', {
+    type: 'search',
+    placeholder: 'ابحث في حركات الشهر بالاسم، كود العضو، الموبايل، أو الباقة...',
+    style: 'min-width:250px;flex:2',
+    oninput: (e) => {
+      q = e.target.value.trim().toLowerCase();
+      renderTable();
+    },
+  });
+
+  const typeSelect = h(
+    'select',
+    {
+      style: 'max-width:220px;flex:1',
+      onchange: (e) => {
+        typeFilter = e.target.value;
+        renderTable();
+      },
+    },
+    h('option', { value: 'all' }, 'الكل (اشتراكات + برايفت)'),
+    h('option', { value: 'new' }, '🟢 اشتراكات جديدة فقط'),
+    h('option', { value: 'renew' }, '🔄 تجديدات فقط'),
+    h('option', { value: 'pt' }, '⭐ برايفت (PT) فقط')
+  );
+
+  function setMonth(ym) {
+    selectedMonth = ym;
+    monthInput.value = ym;
+    try {
+      history.replaceState(null, '', `#/monthly-report?month=${ym}`);
+    } catch {
+      /* ignore */
+    }
+    load(ym).catch((e) => toast(e.message, true));
+  }
+
+  function renderPresets() {
+    const prevMonth = shiftMonth(currentMonth, -1);
+    presetContainer.replaceChildren(
+      h(
+        'button',
+        { type: 'button', class: `preset-btn ${selectedMonth === currentMonth ? 'active' : ''}`, onclick: () => setMonth(currentMonth) },
+        '📅 الشهر الحالي'
+      ),
+      h(
+        'button',
+        { type: 'button', class: `preset-btn ${selectedMonth === prevMonth ? 'active' : ''}`, onclick: () => setMonth(prevMonth) },
+        '⏪ الشهر السابق'
+      ),
+      h(
+        'button',
+        { type: 'button', class: 'preset-btn', onclick: () => setMonth(shiftMonth(selectedMonth, -1)) },
+        '◀ السابق'
+      ),
+      h(
+        'button',
+        { type: 'button', class: 'preset-btn', onclick: () => setMonth(shiftMonth(selectedMonth, 1)) },
+        'التالي ▶'
+      )
+    );
+  }
+
+  function renderSummary() {
+    if (!reportData) return;
+    const tile = (cls, num, lbl) =>
+      h('div', { class: `tile ${cls}` }, h('div', { class: 'num' }, num), h('div', { class: 'lbl' }, lbl));
+
+    summaryBox.replaceChildren(
+      tile('gold', `${fmtMoney(reportData.totalRevenue)} ج.م`, '💰 إجمالي إيراد الشهر'),
+      tile('warn', `${fmtMoney(reportData.totalExpenses || 0)} ج.م`, `💸 إجمالي مصروفات الشهر (${reportData.expenseCount || 0})`),
+      tile((reportData.netAfterExpenses || 0) >= 0 ? 'ok' : 'bad', `${fmtMoney(reportData.netAfterExpenses ?? reportData.totalRevenue)} ج.م`, '✅ صافي الإيراد (الإيراد - المصروفات)'),
+      tile('info', `${fmtMoney(reportData.subRevenue)} ج.م`, `🧾 الاشتراكات (${reportData.subCount})`),
+      tile('ok', `${reportData.newCount} (${fmtMoney(reportData.newRevenue)} ج.م)`, '🟢 اشتراكات جديدة'),
+      tile('', `${reportData.renewCount} (${fmtMoney(reportData.renewRevenue)} ج.م)`, '🔄 تجديد اشتراك'),
+      tile('info', `${reportData.ptCount} (${fmtMoney(reportData.ptRevenue)} ج.م)`, '⭐ إيراد البرايفت (PT)'),
+      tile('warn', `${fmtMoney(reportData.totalSalaries)} ج.م`, `👔 رواتب الموظفين (${reportData.employeeCount})`),
+      tile(reportData.netAfterSalaries >= 0 ? 'ok' : 'bad', `${fmtMoney(reportData.netAfterSalaries)} ج.م`, '📈 الصافي النهائي (بعد المصروفات والرواتب)'),
+      tile('', `${reportData.attendanceCount} زيارة`, '🏋️‍♂️ إجمالي حضور الشهر')
+    );
+  }
+
+  function renderBreakdowns() {
+    if (!reportData) return;
+    const planRows = (reportData.planBreakdown || []).length
+      ? reportData.planBreakdown.map((p) =>
+          h('tr', null, h('td', null, p.name), h('td', null, p.count), h('td', { style: 'font-weight:700;color:#4ade80' }, `${fmtMoney(p.revenue)} ج.م`))
+        )
+      : [h('tr', null, h('td', { class: 'empty', colspan: 3 }, 'لا توجد إيرادات مسجلة في هذا الشهر'))];
+
+    const dailyRows = (reportData.dailyBreakdown || []).length
+      ? reportData.dailyBreakdown.map((d) =>
+          h(
+            'tr',
+            { class: 'clickable', onclick: () => (location.hash = `#/daily-report?date=${d.date}`) },
+            h('td', { class: 'ltr' }, d.date),
+            h('td', null, `${fmtMoney(d.totalRevenue)} ج.م`),
+            h('td', { style: 'color:#f59e0b' }, d.expenses ? `${fmtMoney(d.expenses)} ج.م` : '—'),
+            h('td', { style: `font-weight:700;color:${(d.netRevenue || 0) >= 0 ? '#4ade80' : '#f87171'}` }, `${fmtMoney(d.netRevenue ?? d.totalRevenue)} ج.م`)
+          )
+        )
+      : [h('tr', null, h('td', { class: 'empty', colspan: 4 }, 'لا توجد حركات يومية في هذا الشهر'))];
+
+    breakdownGrid.replaceChildren(
+      h(
+        'div',
+        { class: 'card' },
+        h('h2', null, '📦 توزيع الإيراد حسب الباقة'),
+        h(
+          'div',
+          { class: 'table-wrap' },
+          h(
+            'table',
+            null,
+            h('thead', null, h('tr', null, h('th', null, 'الباقة'), h('th', null, 'العدد'), h('th', null, 'الإجمالي'))),
+            h('tbody', null, planRows)
+          )
+        )
+      ),
+      h(
+        'div',
+        { class: 'card' },
+        h('h2', null, '📆 التفصيل اليومي للشهر (اضغط على اليوم للتفاصيل)'),
+        h(
+          'div',
+          { class: 'table-wrap', style: 'max-height:360px;overflow-y:auto' },
+          h(
+            'table',
+            null,
+            h('thead', null, h('tr', null, h('th', null, 'التاريخ'), h('th', null, 'الإيراد'), h('th', null, 'المصروفات'), h('th', null, 'الصافي'))),
+            h('tbody', null, dailyRows)
+          )
+        )
+      )
+    );
+  }
+
+  function renderMonthlyExpenses() {
+    if (!reportData) return;
+    const exRows = reportData.expensesList || [];
+    const tbody = h('tbody');
+    if (!exRows.length) {
+      tbody.append(h('tr', null, h('td', { class: 'empty', colspan: 6 }, 'لا توجد مصروفات مسجلة في هذا الشهر')));
+    } else {
+      exRows.forEach((ex, i) => {
+        tbody.append(
+          h(
+            'tr',
+            null,
+            h('td', { class: 'muted mono' }, String(i + 1)),
+            h('td', { class: 'ltr muted' }, `${ex.expense_date} ${ex.time || ''}`),
+            h('td', { style: 'font-weight:700' }, ex.title),
+            h('td', null, badge('warn', ex.category)),
+            h('td', { style: 'font-weight:800;color:#f59e0b' }, `${fmtMoney(ex.amount)} ج.م`),
+            h('td', null, ex.recorded_by === 'admin' ? 'مدير' : 'استقبال')
+          )
+        );
+      });
+    }
+    monthlyExpensesCard.replaceChildren(
+      h(
+        'div',
+        { style: 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px' },
+        h('h2', { style: 'margin:0;' }, '💸 سجل مصروفات الشهر'),
+        h('a', { href: '#/expenses', class: 'btn small no-print' }, 'فتح سجل المصروفات الكامل')
+      ),
+      h(
+        'div',
+        { class: 'table-wrap' },
+        h(
+          'table',
+          null,
+          h('thead', null, h('tr', null, h('th', null, '#'), h('th', null, 'التاريخ والوقت'), h('th', null, 'البند'), h('th', null, 'التصنيف'), h('th', null, 'المبلغ'), h('th', null, 'بواسطة'))),
+          tbody,
+          exRows.length
+            ? h('tfoot', null, h('tr', { style: 'background:rgba(255,255,255,0.03);font-weight:900;' }, h('td', { colspan: 4, style: 'text-align:left;padding-left:16px;' }, 'إجمالي مصروفات الشهر:'), h('td', { colspan: 2, style: 'color:#f59e0b;font-size:1.1rem;' }, `${fmtMoney(reportData.totalExpenses || 0)} ج.م`)))
+            : null
+        )
+      )
+    );
+  }
+
+  function renderTable() {
+    if (!reportData) return;
+    const rows = (reportData.list || []).filter((r) => {
+      if (typeFilter !== 'all' && r.type !== typeFilter) return false;
+      if (q) {
+        const text = `${r.member_name} ${r.member_code} ${r.member_phone} ${r.plan_name}`.toLowerCase();
+        if (!text.includes(q)) return false;
+      }
+      return true;
+    });
+
+    const totalFilteredCash = rows.reduce((acc, r) => (r.status !== 'cancelled' ? acc + (Number(r.price) || 0) : acc), 0);
+    const tbody = h('tbody');
+
+    if (!rows.length) {
+      tbody.append(
+        h(
+          'tr',
+          null,
+          h('td', { class: 'empty', colspan: 7 }, reportData.list.length === 0 ? 'لا توجد حركات مالية مسجلة في هذا الشهر' : 'لا توجد نتائج مطابقة للبحث')
+        )
+      );
+    } else {
+      rows.forEach((r, idx) => {
+        const isCancelled = r.status === 'cancelled';
+        const typeBadge =
+          r.type === 'pt'
+            ? badge('info', '⭐ برايفت')
+            : r.type === 'new'
+            ? badge('ok', '🟢 جديد')
+            : badge('info', '🔄 تجديد');
+        tbody.append(
+          h(
+            'tr',
+            {
+              class: 'clickable',
+              style: isCancelled ? 'opacity:0.55;text-decoration:line-through;' : '',
+              onclick: () => (location.hash = `#/members/${r.member_id}`),
+            },
+            h('td', { class: 'muted mono' }, String(idx + 1)),
+            h('td', { class: 'ltr muted' }, `${r.date} ${r.time}`),
+            h('td', { class: 'mono', style: 'font-weight:bold;color:#4ade80' }, r.member_code),
+            h('td', { style: 'font-weight:700' }, r.member_name),
+            h('td', null, r.plan_name),
+            h('td', null, typeBadge),
+            h(
+              'td',
+              { style: 'font-weight:800;color:#4ade80;font-size:1.05rem' },
+              isCancelled ? `${fmtMoney(r.price)} ج.م (ملغى)` : `${fmtMoney(r.price)} ج.م`
+            )
+          )
+        );
+      });
+    }
+
+    tableWrap.replaceChildren(
+      h(
+        'table',
+        null,
+        h(
+          'thead',
+          null,
+          h(
+            'tr',
+            null,
+            h('th', null, '#'),
+            h('th', null, 'التاريخ والوقت'),
+            h('th', null, 'الكود'),
+            h('th', null, 'اسم العضو'),
+            h('th', null, 'الباقة'),
+            h('th', null, 'النوع'),
+            h('th', null, 'المبلغ')
+          )
+        ),
+        tbody,
+        rows.length
+          ? h(
+              'tfoot',
+              null,
+              h(
+                'tr',
+                { style: 'background:rgba(255,255,255,0.03);font-weight:900;' },
+                h('td', { colspan: 6, style: 'text-align:left;padding-left:16px;' }, `الإجمالي (${rows.length} حركة):`),
+                h('td', { style: 'color:#4ade80;font-size:1.15rem;' }, `${fmtMoney(totalFilteredCash)} ج.م`)
+              )
+            )
+          : null
+      )
+    );
+  }
+
+  function renderHistory() {
+    if (!reportData || !reportData.recentMonths) return;
+    historyCard.replaceChildren(
+      h(
+        'div',
+        { style: 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px' },
+        h('h2', { style: 'margin:0;' }, '🗓️ سجل التقفيل الشهري للشهور السابقة (آخر 12 شهر)'),
+        h('span', { class: 'muted', style: 'font-size:0.85rem' }, 'اضغط على أي شهر لعرض إيراداته وتفاصيله بالكامل')
+      ),
+      h(
+        'div',
+        { class: 'history-grid' },
+        reportData.recentMonths.map((item) => {
+          const isCurrent = item.month === selectedMonth;
+          return h(
+            'div',
+            {
+              class: `history-item ${isCurrent ? 'active' : ''}`,
+              onclick: () => setMonth(item.month),
+              title: `عرض تقفيل ${fmtMonthArabic(item.month)}`,
+            },
+            h('div', { class: 'd-title' }, fmtMonthArabic(item.month)),
+            h('div', { class: 'd-rev' }, `${fmtMoney(item.revenue)} ج.م`),
+            h('div', { class: 'd-cnt' }, item.count === 0 ? 'لا توجد حركات' : `${item.count} حركة`)
+          );
+        })
+      )
+    );
+  }
+
+  async function load(ym) {
+    const label = fmtMonthArabic(ym);
+    monthDisplay.textContent = label;
+    printMonthLabel.textContent = `الشهر: ${label} (${ym})`;
+    renderPresets();
+    reportData = await api('GET', `/api/reports/monthly?month=${encodeURIComponent(ym)}`);
+    renderSummary();
+    renderBreakdowns();
+    renderTable();
+    renderMonthlyExpenses();
+    renderHistory();
+  }
+
+  const printHeader = h(
+    'div',
+    { class: 'print-only', style: 'margin-bottom:20px;text-align:center;border-bottom:2px solid #000;padding-bottom:12px' },
+    h('h1', { style: 'margin:0 0 6px 0;font-size:1.8rem;color:#000' }, `${ME.gymName || 'Hulk GYM'} — التقفيل الشهري للإيرادات`),
+    printMonthLabel,
+    h('div', { style: 'font-size:0.9rem;color:#666;margin-top:4px' }, `وقت استخراج التقرير: ${new Date().toLocaleString('ar-EG', { timeZone: TZ })}`)
+  );
+
+  const printSignatures = h(
+    'div',
+    { class: 'print-only-flex', style: 'justify-content:space-between;margin-top:40px;padding-top:20px;border-top:1px dashed #444;font-size:1rem;color:#000' },
+    h('div', null, h('b', null, 'المحاسب / الاستقبال:'), ' ................................'),
+    h('div', null, h('b', null, 'مدير الجيم:'), ' ................................'),
+    h('div', null, h('b', null, 'صافي الإيراد المعتمد:'), ' ................................ ج.م')
+  );
+
+  app.replaceChildren(
+    printHeader,
+    h(
+      'div',
+      { class: 'page-head no-print' },
+      h(
+        'div',
+        null,
+        h(
+          'div',
+          { style: 'display:flex;align-items:center;gap:12px;margin-bottom:4px;flex-wrap:wrap;' },
+          backBtn('#/', 'الرئيسية'),
+          h('h1', { style: 'display:flex;align-items:center;gap:10px;margin:0;' }, '📅 التقفيل الشهري للإيرادات')
+        ),
+        h('div', { class: 'muted', style: 'font-size:0.95rem;margin-top:2px' }, 'إجمالي إيرادات الاشتراكات والبرايفت (PT) ومقارنتها برواتب الموظفين')
+      ),
+      h(
+        'div',
+        { class: 'actions' },
+        h('button', { type: 'button', class: 'btn primary', onclick: () => window.print() }, '🖨️ طباعة التقفيل الشهري'),
+        h('button', { type: 'button', class: 'btn', onclick: () => setMonth(selectedMonth) }, '🔄 تحديث')
+      )
+    ),
+    h(
+      'div',
+      { class: 'card no-print', style: 'padding:14px 18px;margin-bottom:16px;' },
+      h(
+        'div',
+        { style: 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px' },
+        h('div', { class: 'date-nav' }, h('span', { style: 'font-weight:700' }, 'الشهر:'), monthInput, monthDisplay),
+        presetContainer
+      )
+    ),
+    summaryBox,
+    breakdownGrid,
+    h('div', { class: 'toolbar no-print', style: 'margin-top:20px;margin-bottom:12px' }, searchInput, typeSelect),
+    tableWrap,
+    monthlyExpensesCard,
+    printSignatures,
+    historyCard
+  );
+
+  await load(selectedMonth);
+}
+
+// ---------- المصروفات اليومية والسجل الدائم (للمدير والموظف) ----------
+const EXPENSE_CATEGORIES = ['صيانة', 'كهرباء ومياه', 'نظافة', 'مشتريات', 'سلف/رواتب', 'ضيافة', 'أخرى'];
+
+async function pageExpenses() {
+  const today = todayLocal();
+  const currentMonth = today.slice(0, 7);
+  let q = '';
+  let filterMonth = currentMonth;
+  let filterDate = '';
+  let filterCat = 'all';
+  let data = null;
+
+  const summaryBox = h('div', { class: 'tiles' });
+  const tableWrap = h('div', { class: 'card table-wrap' });
+
+  const titleInput = h('input', { type: 'text', placeholder: 'مثال: فاتورة كهرباء، صيانة تريدميل، أدوات نظافة...', required: true, maxlength: 150 });
+  const amountInput = h('input', { type: 'number', step: 'any', min: '1', placeholder: 'المبلغ بالجنيه', required: true, class: 'ltr' });
+  const catSelect = h('select', null, EXPENSE_CATEGORIES.map((c) => h('option', { value: c }, c)));
+  const dateInput = h('input', { type: 'date', value: today, required: true });
+  const notesInput = h('input', { type: 'text', placeholder: 'ملاحظات إضافية (اختياري)', maxlength: 300 });
+  const submitBtn = h('button', { type: 'submit', class: 'btn primary' }, '💾 تسجيل المصروف');
+
+  const addForm = h(
+    'form',
+    {
+      class: 'card',
+      style: 'margin-bottom:20px;',
+      onsubmit: async (e) => {
+        e.preventDefault();
+        submitBtn.disabled = true;
+        try {
+          await api('POST', '/api/expenses', {
+            title: titleInput.value.trim(),
+            amount: Number(amountInput.value),
+            category: catSelect.value,
+            expense_date: dateInput.value || today,
+            notes: notesInput.value.trim(),
+          });
+          titleInput.value = '';
+          amountInput.value = '';
+          notesInput.value = '';
+          toast('تم تسجيل المصروف في السجل الدائم');
+          await load();
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          submitBtn.disabled = false;
+        }
+      },
+    },
+    h(
+      'div',
+      { style: 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px' },
+      h('h2', { style: 'margin:0;' }, '➕ تسجيل مصروف يومي جديد'),
+      h('span', { class: 'badge warn' }, '🔒 سجل دائم لا يُحذف — يُخصم تلقائياً من التقفيل اليومي والشهري')
+    ),
+    h(
+      'div',
+      { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;' },
+      field('بيان / اسم المصروف *', titleInput),
+      field('المبلغ (ج.م) *', amountInput),
+      field('التصنيف', catSelect),
+      field('التاريخ', dateInput),
+      field('ملاحظات', notesInput)
+    ),
+    h('div', { class: 'actions', style: 'margin-top:10px;' }, submitBtn)
+  );
+
+  const searchInput = h('input', {
+    type: 'search',
+    placeholder: 'ابحث في سجل المصروفات (البيان، التصنيف، الملاحظات)...',
+    style: 'min-width:220px;flex:2',
+    oninput: (e) => {
+      q = e.target.value.trim().toLowerCase();
+      load().catch((err) => toast(err.message, true));
+    },
+  });
+  const monthFilterInput = h('input', {
+    type: 'month',
+    value: filterMonth,
+    style: 'max-width:165px',
+    onchange: (e) => {
+      filterMonth = e.target.value;
+      filterDate = '';
+      dateFilterInput.value = '';
+      load().catch((err) => toast(err.message, true));
+    },
+  });
+  const dateFilterInput = h('input', {
+    type: 'date',
+    value: '',
+    style: 'max-width:165px',
+    onchange: (e) => {
+      filterDate = e.target.value;
+      load().catch((err) => toast(err.message, true));
+    },
+  });
+  const catFilterSelect = h(
+    'select',
+    {
+      style: 'max-width:170px',
+      onchange: (e) => {
+        filterCat = e.target.value;
+        load().catch((err) => toast(err.message, true));
+      },
+    },
+    h('option', { value: 'all' }, 'كل التصنيفات'),
+    ...EXPENSE_CATEGORIES.map((c) => h('option', { value: c }, c))
+  );
+
+  function renderSummary() {
+    if (!data) return;
+    const tile = (cls, num, lbl) =>
+      h('div', { class: `tile ${cls}` }, h('div', { class: 'num' }, num), h('div', { class: 'lbl' }, lbl));
+    summaryBox.replaceChildren(
+      tile('warn', `${fmtMoney(data.todayTotal)} ج.م`, '💸 مصروفات اليوم'),
+      tile('gold', `${fmtMoney(data.monthTotal)} ج.م`, '📅 مصروفات الشهر الحالي'),
+      tile('info', `${fmtMoney(data.filteredTotal)} ج.م`, '🔍 إجمالي نتائج الفلتر الحالي'),
+      tile('', `${data.count} سجل`, '📑 عدد المصروفات المعروضة')
+    );
+  }
+
+  function renderTable() {
+    if (!data) return;
+    const rows = data.list || [];
+    const tbody = h('tbody');
+    if (!rows.length) {
+      tbody.append(h('tr', null, h('td', { class: 'empty', colspan: 8 }, 'لا توجد مصروفات مسجلة مطابقة للبحث')));
+    } else {
+      rows.forEach((ex, idx) => {
+        tbody.append(
+          h(
+            'tr',
+            null,
+            h('td', { class: 'muted mono' }, String(idx + 1)),
+            h('td', { class: 'ltr' }, ex.expense_date),
+            h('td', { class: 'ltr muted' }, ex.time || '-'),
+            h('td', { style: 'font-weight:700' }, ex.title),
+            h('td', null, badge('warn', ex.category)),
+            h('td', { style: 'font-weight:800;color:#f59e0b;font-size:1.05rem' }, `${fmtMoney(ex.amount)} ج.م`),
+            h('td', { class: 'muted' }, ex.notes || '—'),
+            h('td', null, badge(ex.recorded_by === 'admin' ? 'ok' : 'info', ex.recorded_by === 'admin' ? 'مدير' : 'استقبال'))
+          )
+        );
+      });
+    }
+
+    tableWrap.replaceChildren(
+      h(
+        'table',
+        null,
+        h(
+          'thead',
+          null,
+          h(
+            'tr',
+            null,
+            h('th', null, '#'),
+            h('th', null, 'التاريخ'),
+            h('th', null, 'الوقت'),
+            h('th', null, 'بيان المصروف'),
+            h('th', null, 'التصنيف'),
+            h('th', null, 'المبلغ'),
+            h('th', null, 'ملاحظات'),
+            h('th', null, 'سُجل بواسطة')
+          )
+        ),
+        tbody,
+        rows.length
+          ? h(
+              'tfoot',
+              null,
+              h(
+                'tr',
+                { style: 'background:rgba(255,255,255,0.03);font-weight:900;' },
+                h('td', { colspan: 5, style: 'text-align:left;padding-left:16px;' }, `الإجمالي (${rows.length} سجل):`),
+                h('td', { colspan: 3, style: 'color:#f59e0b;font-size:1.15rem;' }, `${fmtMoney(data.filteredTotal)} ج.م`)
+              )
+            )
+          : null
+      )
+    );
+  }
+
+  async function load() {
+    const qs = new URLSearchParams();
+    if (filterDate) qs.set('date', filterDate);
+    else if (filterMonth) qs.set('month', filterMonth);
+    if (filterCat !== 'all') qs.set('category', filterCat);
+    if (q) qs.set('q', q);
+    data = await api('GET', `/api/expenses?${qs.toString()}`);
+    renderSummary();
+    renderTable();
+  }
+
+  app.replaceChildren(
+    h(
+      'div',
+      { class: 'page-head' },
+      h(
+        'div',
+        { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;' },
+        backBtn('#/', 'الرئيسية'),
+        h('h1', { style: 'margin:0;' }, '💸 المصروفات اليومية وسجل المصروفات')
+      ),
+      h(
+        'div',
+        { class: 'actions' },
+        h('button', { type: 'button', class: 'btn', onclick: () => load().catch((e) => toast(e.message, true)) }, '🔄 تحديث')
+      )
+    ),
+    addForm,
+    summaryBox,
+    h(
+      'div',
+      { class: 'toolbar', style: 'margin-top:20px;margin-bottom:12px' },
+      searchInput,
+      monthFilterInput,
+      dateFilterInput,
+      catFilterSelect,
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn small',
+          onclick: () => {
+            q = '';
+            searchInput.value = '';
+            filterMonth = '';
+            monthFilterInput.value = '';
+            filterDate = '';
+            dateFilterInput.value = '';
+            filterCat = 'all';
+            catFilterSelect.value = 'all';
+            load().catch((e) => toast(e.message, true));
+          },
+        },
+        'عرض كل السجل'
+      )
+    ),
+    tableWrap
+  );
+
+  await load();
 }
 
 // ---------- مشتركي التدريب الخاص (البرايفت - PT) ----------
@@ -1469,7 +2194,7 @@ async function pagePrivateTrainings(query = '') {
         );
 
         let countdownLabel = '';
-        let barColor = 'linear-gradient(90deg, #10b981 0%, #34d399 50%, #ffd778 100%)';
+        let barColor = 'linear-gradient(90deg, #10b981 0%, #34d399 50%, #4ade80 100%)';
         let statusBadge = null;
 
         if (pt.state === 'active') {
@@ -1746,7 +2471,7 @@ async function privateModal(ptOrMember, isEdit, onDone) {
   });
 
   const formFields = [
-    memberSelectEl ? field('العضو المشترك *', memberSelectEl) : h('div', { class: 'field' }, h('label', null, 'العضو المشترك'), h('b', { style: 'color:#ffd778;font-size:1.1rem;' }, memberName)),
+    memberSelectEl ? field('العضو المشترك *', memberSelectEl) : h('div', { class: 'field' }, h('label', null, 'العضو المشترك'), h('b', { style: 'color:#4ade80;font-size:1.1rem;' }, memberName)),
     coaches.length > 0 ? field('اختيار سريع للمدرب', coachSelect) : null,
     field('اسم الكابتن / المدرب المسئول *', trainerInput),
     h('div', { class: 'row' }, field('المدة بالشهور', durationSelect), field('المدة بالأيام *', durationDaysInput)),
@@ -2234,7 +2959,7 @@ async function pageReminders() {
                 onclick: () => {
                   const msg = makeWhatsAppMsg();
                   openModal(`معاينة رسالة ${m.name}`,
-                    [h('pre', { style: 'white-space:pre-wrap;font-size:0.85rem;direction:rtl;text-align:right;background:#141724;color:#f1f5f9;padding:14px;border-radius:10px;border:1px solid rgba(229,169,60,0.25);max-height:320px;overflow-y:auto' }, msg)],
+                    [h('pre', { style: 'white-space:pre-wrap;font-size:0.85rem;direction:rtl;text-align:right;background:#141724;color:#f1f5f9;padding:14px;border-radius:10px;border:1px solid rgba(34, 197, 94,0.25);max-height:320px;overflow-y:auto' }, msg)],
                     async () => {}, 'إغلاق'
                   );
                 }
@@ -2486,7 +3211,12 @@ async function pageSettings() {
         subscription_created: 'إضافة اشتراك',
         subscription_cancelled: 'إلغاء اشتراك',
         subscription_frozen: 'تجميد اشتراك',
-        member_deleted: 'حذف عضو',
+        member_deleted: 'أرشفة عضو',
+        archive_member: 'أرشفة عضو',
+        archive_attendance: 'أرشفة حضور',
+        archive_employee: 'أرشفة موظف',
+        archive_private_training: 'أرشفة برايفت',
+        add_expense: 'تسجيل مصروف',
         manual_attendance: 'تسجيل حضور يدوي',
         change_admin_password: 'تغيير كلمة مرور المدير',
         change_staff_password: 'تغيير كلمة مرور الموظف',
@@ -2497,10 +3227,10 @@ async function pageSettings() {
       };
 
       const tableRows = logs && logs.length
-        ? logs.slice(0, 40).map(l =>
+        ? logs.slice(0, 100).map(l =>
             h('tr', null,
-              h('td', null, h('span', { class: 'badge', style: l.action.includes('delete') || l.action.includes('cancelled') ? 'background:rgba(239,68,68,0.15);color:#f87171;' : l.action.includes('frozen') ? 'background:rgba(59,130,246,0.15);color:#93c5fd;' : 'background:rgba(229,169,60,0.15);color:#ffd778;' }, actionLabels[l.action] || l.action)),
-              h('td', null, h('b', { style: l.performed_by === 'admin' ? 'color:#ffd778;' : 'color:#93c5fd;' }, l.performed_by)),
+              h('td', null, h('span', { class: 'badge', style: l.action.includes('delete') || l.action.includes('cancelled') ? 'background:rgba(239,68,68,0.15);color:#f87171;' : l.action.includes('frozen') ? 'background:rgba(59,130,246,0.15);color:#93c5fd;' : 'background:rgba(34, 197, 94,0.15);color:#4ade80;' }, actionLabels[l.action] || l.action)),
+              h('td', null, h('b', { style: l.performed_by === 'admin' ? 'color:#4ade80;' : 'color:#93c5fd;' }, l.performed_by)),
               h('td', { style: 'max-width:320px;white-space:normal;font-size:0.86rem;color:#cbd5e1;' }, l.details),
               h('td', { class: 'muted', style: 'font-size:0.82rem;' }, fmtDateTime(l.created_at))
             )
@@ -2534,6 +3264,7 @@ async function pageSettings() {
       const status = await api('GET', '/api/backup/status');
       const backupBtn = h('button', { class: 'btn primary' }, '⚡ أخذ نسخة احتياطية الآن');
       const downloadBtn = h('a', { class: 'btn', href: '/api/backup/download', target: '_blank', download: '' }, '💾 تحميل نسخة لجهازك / فلاشة');
+      const membersPdfBtn = h('a', { class: 'btn', href: '/api/export/members.pdf', target: '_blank', download: '', style: 'background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;' }, '📄 تحميل ملف PDF للأعضاء');
       const restoreInput = h('input', { type: 'file', accept: '.db,.sqlite', style: 'display:none' });
       const restoreBtn = h('button', { class: 'btn danger' }, '🔄 استرجاع نسخة احتياطية');
       const optBtn = h('button', { class: 'btn' }, '🚀 تسريع وتنظيف النظام');
@@ -2565,6 +3296,8 @@ async function pageSettings() {
           backupBtn.disabled = false;
         }
       };
+
+
 
       restoreBtn.onclick = () => restoreInput.click();
 
@@ -2628,7 +3361,7 @@ async function pageSettings() {
                   }, '🔄 استرجاع هذه النسخة');
 
                   return h('tr', null,
-                    h('td', { class: 'mono', style: 'color:#ffd778;font-size:0.88rem' }, b.name),
+                    h('td', { class: 'mono', style: 'color:#4ade80;font-size:0.88rem' }, b.name),
                     h('td', null, Math.round(b.size / 1024) + ' كيلوبايت'),
                     h('td', { class: 'muted', style: 'font-size:0.85rem' }, fmtDateTime(b.mtime)),
                     h('td', { style: 'text-align:center' }, restoreSavedBtn)
@@ -2640,23 +3373,24 @@ async function pageSettings() {
         : h('div', { class: 'muted', style: 'margin-top:10px;font-size:0.9rem' }, 'لا توجد نسخ احتياطية مسجلة بعد.');
 
       backupCard.replaceChildren(
-        h('h2', { style: 'color:#ffd778;display:flex;align-items:center;gap:8px;' }, '💾 النسخ الاحتياطي وحماية البيانات من الضياع'),
+        h('h2', { style: 'color:#4ade80;display:flex;align-items:center;gap:8px;' }, '💾 النسخ الاحتياطي وحماية البيانات من الضياع'),
         h('p', { class: 'muted', style: 'font-size:0.92rem;margin-bottom:14px;line-height:1.7' },
-          'يقوم السيستم بعمل نسخ احتياطي تلقائي يومياً. لحماية بياناتك من سقوط نسخة الويندوز أو تلف الجهاز، يمكنك تحميل نسخة احتياطية يدوياً بضغطة زر أو حفظها في بارتشن آخر / فلاشة خارجية.'
+          'السيستم يحفظ نسخة احتياطية تلقائياً يومياً، وجميع سجلات الحضور والاشتراكات والمصروفات محمية ضد الحذف النهائي (تُؤرشف فقط). يمكنك تحميل ملف PDF منظم يحتوي على جميع الأعضاء وبياناتهم بضغطة زر.'
         ),
         h('div', { class: 'row', style: 'gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;' },
           backupBtn,
           downloadBtn,
+          membersPdfBtn,
           restoreBtn,
           optBtn,
           auditBtn,
           restoreInput
         ),
-        h('div', { style: 'background:rgba(20,24,35,0.7);border:1px solid rgba(229,169,60,0.2);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.9rem;' },
+        h('div', { style: 'background:rgba(20,24,35,0.7);border:1px solid rgba(34, 197, 94,0.2);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.9rem;' },
           status.safeDir
             ? h('div', { style: 'margin-bottom:6px' }, h('b', { style: 'color:#4ade80' }, '🛡️ مسار الحفظ في البارتشن الآمن (خارج C تماماً): '), h('code', { class: 'mono', style: 'color:#4ade80' }, status.safeDir))
             : '',
-          h('div', null, h('b', { style: 'color:#cbd5e1' }, '📁 مسار النسخ الاحتياطي الداخلي للنظام: '), h('code', { class: 'mono', style: 'color:#ffd778' }, status.primaryDir))
+          h('div', null, h('b', { style: 'color:#cbd5e1' }, '📁 مسار النسخ الاحتياطي الداخلي للنظام: '), h('code', { class: 'mono', style: 'color:#4ade80' }, status.primaryDir))
         ),
         h('h3', { style: 'font-size:0.95rem;margin:14px 0 6px;' }, '🕒 آخر النسخ الاحتياطية المحفوظة تلقائياً:'),
         backupsTable
@@ -2717,7 +3451,9 @@ async function route() {
     else if ((m = pathPart.match(/^#\/members\/(\d+)$/))) await pageMember(m[1]);
     else if (pathPart === '#/private') await pagePrivateTrainings(query);
     else if (pathPart === '#/attendance') await pageAttendance();
+    else if (pathPart === '#/expenses') await pageExpenses(query);
     else if (pathPart === '#/daily-report') await pageDailyReport(query);
+    else if (pathPart === '#/monthly-report') await pageMonthlyReport(query);
     else if (pathPart === '#/employees') await pageEmployees();
     else if (pathPart === '#/plans') await pagePlans();
     else if (pathPart === '#/reminders') await pageReminders();
@@ -2739,7 +3475,7 @@ async function route() {
     const brandEl = document.getElementById('brand');
     if (brandEl) {
       brandEl.replaceChildren(
-        h('img', { src: '/xgym-logo.jpg', alt: ME.gymName, class: 'brand-logo' }),
+        h('img', { src: '/hulkgym-logo.jpg', alt: ME.gymName, class: 'brand-logo' }),
         h('span', null, ME.gymName)
       );
     }
@@ -2748,3 +3484,4 @@ async function route() {
   window.addEventListener('hashchange', route);
   route();
 })();
+

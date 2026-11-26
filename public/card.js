@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 let currentMember = null;
 let currentGymName = 'الجيم';
@@ -123,7 +123,7 @@ function getWhatsAppMessage(m,gym) {
   const planInfo = m.sub && m.sub.plan_name ? m.sub.plan_name : 'عضوية عامة';
   const endDate = m.sub && m.sub.end_date ? m.sub.end_date : 'غير محدد';
 
-  return `مرحباً بك يا ${m.name} في X Gym🏋️‍♂️✨
+  return `مرحباً بك يا ${m.name} في ${gym || 'Hulk GYM'}🏋️‍♂️✨
 
 تم تسجيل عضويتك بنجاح! تفاصيل الاشتراك:
 🆔 كود العضوية: ${m.code}
@@ -205,7 +205,7 @@ async function renderCardToBlob() {
         const me = await api('GET', '/api/me');
         const mem = await api('GET', `/api/members/${encodeURIComponent(queryIdent)}`);
         d = {
-          gymName: me.gymName || 'X GYM',
+          gymName: me.gymName || 'Hulk GYM',
           name: mem.member.name,
           code: mem.member.code,
           phone: mem.member.phone,
@@ -219,12 +219,12 @@ async function renderCardToBlob() {
     }
 
     currentMember = d;
-    currentGymName = d.gymName || 'X GYM';
+    currentGymName = d.gymName || 'Hulk GYM';
     document.title = `كارت ${d.name} (${d.code}) - ${currentGymName}`;
 
     const titleEl = document.getElementById('gym-title');
     if (titleEl) {
-      titleEl.innerHTML = `<img src="/xgym-logo.jpg" alt="X GYM" class="card-brand-img"> <span>${currentGymName} VIP • كارت العضوية</span>`;
+      titleEl.innerHTML = `<img src="/hulkgym-logo.jpg" alt="${currentGymName}" class="card-brand-img"> <span>${currentGymName} VIP • كارت العضوية</span>`;
     }
 
     // تجهيز صورة الباركود

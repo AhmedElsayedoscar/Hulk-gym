@@ -11,7 +11,7 @@ const { toBarcode } = require('./qr');
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const TZ = process.env.TZ_NAME || 'Africa/Cairo';
-const GYM_NAME = process.env.GYM_NAME || 'X GYM';
+const GYM_NAME = process.env.GYM_NAME || 'Hulk GYM';
 const SESSION_HOURS = 12;
 const DUPLICATE_WINDOW_MIN = 5; // تجاهل تكرار المسح لنفس العضو خلال هذه المدة
 const EXPIRING_DAYS = 7;
@@ -335,9 +335,9 @@ function doCheckin(rawCode) {
       .prepare('INSERT INTO attendance (member_id, day, checkin_at, result, reason) VALUES (?, ?, ?, ?, ?)')
       .run(m.id, today, now.toISOString(), result, reason);
 
-  if (!m.active) {
+  if (m.active !== 1) {
     log('denied', 'inactive');
-    return { ok: false, reason: 'inactive', message: 'العضوية موقوفة', ...base };
+    return { ok: false, reason: 'inactive', message: m.active === -1 ? 'العضوية مؤرشفة' : 'العضوية موقوفة', ...base };
   }
   if (sub.state === 'none' || sub.state === 'expired' || sub.state === 'upcoming') {
     const message =
@@ -558,9 +558,10 @@ route('DELETE', '/api/employees/:id', 'admin', (ctx) => {
   const old = db.prepare('SELECT * FROM employees WHERE id = ?').get(id);
   if (!old) throw new ApiError(404, 'الموظف غير موجود');
 
-  db.prepare('DELETE FROM employees WHERE id = ?').run(id);
-  logAudit('delete_employee', 'admin', `حذف الموظف: ${old.name} (${old.role})`, ctx.ip);
-  return { ok: true };
+  // ✅ أرشفة الموظف بدلاً من الحذف النهائي لحماية السجلات والتقارير
+  db.prepare('UPDATE employees SET active = 0 WHERE id = ?').run(id);
+  logAudit('archive_employee', 'admin', `أرشفة الموظف: ${old.name} (${old.role}) - السجلات محفوظة`, ctx.ip);
+  return { ok: true, message: 'تم أرشفة الموظف مع الاحتفاظ بجميع سجلاته' };
 });
 
 // الأعضاء
@@ -572,19 +573,31 @@ route('GET', '/api/members', 'staff', (ctx) => {
   if (q) {
     const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
     rows = db
-      .prepare(`SELECT * FROM members WHERE name LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR code LIKE ? ESCAPE '\\' ORDER BY name LIMIT 500`)
+      .prepare(`SELECT * FROM members WHERE ${status === 'archived' ? 'active = -1' : 'active != -1'} AND (name LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR code LIKE ? ESCAPE '\\') ORDER BY name LIMIT 500`)
       .all(like, like, like.toUpperCase());
-  } else rows = db.prepare('SELECT * FROM members ORDER BY id DESC LIMIT 500').all();
+  } else {
+    rows = db.prepare(`SELECT * FROM members WHERE ${status === 'archived' ? 'active = -1' : 'active != -1'} ORDER BY id DESC LIMIT 500`).all();
+  }
   let list = rows.map((m) => memberView(m, today));
-  if (status !== 'all') {
+  if (status !== 'all' && status !== 'archived') {
     list = list.filter((m) => (status === 'active' ? m.sub.state === 'active' || m.sub.state === 'expiring' : m.sub.state === status));
   }
   return list;
 });
 
+function parseMemberAge(val) {
+  if (val === undefined || val === null || String(val).trim() === '') return null;
+  const n = Number(toEnglishDigits(String(val).trim()));
+  if (!Number.isInteger(n) || n < 5 || n > 120) {
+    throw new ApiError(400, 'السن غير صحيح (يجب أن يكون بين 5 و 120 سنة)');
+  }
+  return n;
+}
+
 route('POST', '/api/members', 'staff', (ctx) => {
   const name = cleanStr(ctx.body.name, 100, 'الاسم', true);
   const phone = toEnglishDigits(cleanStr(ctx.body.phone, 30, 'رقم الموبايل'));
+  const age = parseMemberAge(ctx.body.age);
   const notes = cleanStr(ctx.body.notes, 500, 'الملاحظات');
   const planId = ctx.body.plan_id ? intParam(ctx.body.plan_id) : null;
   if (planId && !db.prepare('SELECT 1 FROM plans WHERE id = ? AND active = 1').get(planId)) {
@@ -604,8 +617,8 @@ route('POST', '/api/members', 'staff', (ctx) => {
   db.exec('BEGIN');
   try {
     const r = db
-      .prepare('INSERT INTO members (code, name, phone, notes, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(code, name, phone, notes, new Date().toISOString());
+      .prepare('INSERT INTO members (code, name, phone, age, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(code, name, phone, age, notes, new Date().toISOString());
     id = Number(r.lastInsertRowid);
     if (planId) createSubscription(id, planId, ctx.body.start_date, ctx.body.price);
     db.exec('COMMIT');
@@ -637,6 +650,7 @@ route('PUT', '/api/members/:id', 'staff', (ctx) => {
   if (!m) throw new ApiError(404, 'العضو غير موجود');
   const name = cleanStr(ctx.body.name ?? m.name, 100, 'الاسم', true);
   const phone = toEnglishDigits(cleanStr(ctx.body.phone ?? m.phone, 30, 'رقم الموبايل'));
+  const age = ctx.body.age === undefined ? m.age : parseMemberAge(ctx.body.age);
   const notes = cleanStr(ctx.body.notes ?? m.notes, 500, 'الملاحظات');
   const active = ctx.body.active === undefined ? m.active : ctx.body.active ? 1 : 0;
   let code = m.code;
@@ -649,10 +663,11 @@ route('PUT', '/api/members/:id', 'staff', (ctx) => {
       code = customCode;
     }
   }
-  db.prepare('UPDATE members SET code = ?, name = ?, phone = ?, notes = ?, active = ? WHERE id = ?').run(
+  db.prepare('UPDATE members SET code = ?, name = ?, phone = ?, age = ?, notes = ?, active = ? WHERE id = ?').run(
     code,
     name,
     phone,
+    age,
     notes,
     active,
     id
@@ -662,8 +677,12 @@ route('PUT', '/api/members/:id', 'staff', (ctx) => {
 
 route('DELETE', '/api/members/:id', 'admin', (ctx) => {
   const id = intParam(ctx.params.id);
-  db.prepare('DELETE FROM members WHERE id = ?').run(id);
-  return { ok: true };
+  const member = db.prepare('SELECT * FROM members WHERE id = ?').get(id);
+  if (!member) throw new ApiError(404, 'العضو غير موجود');
+  // ✅ Soft Delete - ارشفة بدل الحذف النهائي لحماية بيانات الحضور والاشتراكات
+  db.prepare(`UPDATE members SET active = -1, notes = '[مؤرشف] ' || notes WHERE id = ?`).run(id);
+  logAudit('archive_member', ctx.session?.role || 'admin', `ارشفة عضو: ${member.name} (${member.code}) - بيانات الحضور والاشتراكات محفوظة`, ctx.ip);
+  return { ok: true, message: 'تم ارشفة العضو - جميع بياناته محفوظة في السجلات' };
 });
 
 route('POST', '/api/members/:id/subscriptions', 'staff', (ctx) => {
@@ -677,8 +696,11 @@ route('POST', '/api/members/:id/subscriptions', 'staff', (ctx) => {
 
 route('DELETE', '/api/subscriptions/:id', 'admin', (ctx) => {
   const id = intParam(ctx.params.id);
+  const sub = db.prepare('SELECT s.*, m.name AS member_name FROM subscriptions s LEFT JOIN members m ON m.id = s.member_id WHERE s.id = ?').get(id);
+  if (!sub) throw new ApiError(404, 'الاشتراك غير موجود');
   db.prepare(`UPDATE subscriptions SET status = 'cancelled' WHERE id = ?`).run(id);
-  return { ok: true };
+  logAudit('subscription_cancelled', ctx.session?.role || 'admin', `إلغاء اشتراك #${id} (${sub.plan_name}) للعضو ${sub.member_name || sub.member_id} - السجل محفوظ`, ctx.ip);
+  return { ok: true, message: 'تم إلغاء الاشتراك مع الاحتفاظ بسجله للمراجعة' };
 });
 
 // ---------- البرايفت / التدريب الخاص (Private Training) ----------
@@ -816,13 +838,14 @@ route('PUT', '/api/private-trainings/:id', 'staff', (ctx) => {
 
 route('DELETE', '/api/private-trainings/:id', 'admin', (ctx) => {
   const ptId = intParam(ctx.params.id);
-  const pt = db.prepare('SELECT id, member_id, trainer_name FROM private_trainings WHERE id = ?').get(ptId);
+  const pt = db.prepare('SELECT id, member_id, trainer_name, package_name FROM private_trainings WHERE id = ?').get(ptId);
   if (!pt) throw new ApiError(404, 'اشتراك البرايفت غير موجود');
 
-  db.prepare('DELETE FROM private_trainings WHERE id = ?').run(ptId);
-  logAudit('delete_private_training', 'admin', `حذف اشتراك برايفت رقم ${ptId}`, ctx.ip);
+  // ✅ أرشفة (إلغاء) اشتراك البرايفت بدلاً من الحذف النهائي
+  db.prepare(`UPDATE private_trainings SET status = 'cancelled', notes = '[ملغي/مؤرشف] ' || notes WHERE id = ?`).run(ptId);
+  logAudit('archive_private_training', 'admin', `أرشفة اشتراك برايفت #${ptId} (${pt.package_name} - ${pt.trainer_name}) - السجل محفوظ`, ctx.ip);
 
-  return { ok: true };
+  return { ok: true, message: 'تم أرشفة اشتراك البرايفت مع الاحتفاظ بسجله' };
 });
 
 function memberBarcodeSvg(code) {
@@ -945,9 +968,14 @@ route('GET', '/api/attendance', 'staff', (ctx) => {
     params.push(like, like, like);
   }
 
+  const includeArchived = ctx.url.searchParams.get('archived') === '1';
+  if (!includeArchived) {
+    conditions.push('COALESCE(a.archived, 0) = 0');
+  }
+
   const whereClause = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
   const sql = `
-    SELECT a.id, a.day, a.checkin_at, a.result, a.reason, m.id AS member_id, m.name, m.phone, m.code
+    SELECT a.id, a.day, a.checkin_at, a.result, a.reason, COALESCE(a.archived, 0) AS archived, m.id AS member_id, m.name, m.phone, m.code
     FROM attendance a
     JOIN members m ON m.id = a.member_id
     ${whereClause}
@@ -972,11 +1000,103 @@ route('POST', '/api/attendance/manual', 'staff', (ctx) => {
   return { ok: true, id: Number(r.lastInsertRowid) };
 });
 
-// حذف حركة حضور مسجلة بالخطأ (للمدير)
+// أرشفة حركة حضور (محمي - لا حذف نهائي لضمان أمان السجلات)
 route('DELETE', '/api/attendance/:id', 'admin', (ctx) => {
   const id = intParam(ctx.params.id);
-  db.prepare('DELETE FROM attendance WHERE id = ?').run(id);
-  return { ok: true };
+  const rec = db.prepare('SELECT * FROM attendance WHERE id = ?').get(id);
+  if (!rec) throw new ApiError(404, 'سجل الحضور غير موجود');
+  // ✅ لا يُحذف نهائياً - يُؤرشف عبر عمود archived مع تسجيل في audit_logs
+  db.prepare(`UPDATE attendance SET archived = 1, reason = CASE WHEN reason LIKE '[مؤرشف]%' THEN reason ELSE '[مؤرشف] ' || reason END WHERE id = ?`).run(id);
+  logAudit('archive_attendance', ctx.session?.role || 'admin', `أرشفة سجل حضور #${id} للعضو ${rec.member_id} بتاريخ ${rec.day}`, ctx.ip);
+  return { ok: true, message: 'تم أرشفة سجل الحضور - لا يمكن الحذف النهائي لأمان البيانات' };
+});
+
+// ---------- المصروفات اليومية (سجل دائم لا يُحذف — متاح للمدير والموظف) ----------
+route('GET', '/api/expenses', 'staff', (ctx) => {
+  const dateParam = (ctx.url.searchParams.get('date') || '').trim();
+  const monthParam = (ctx.url.searchParams.get('month') || '').trim();
+  const category = (ctx.url.searchParams.get('category') || '').trim();
+  const q = (ctx.url.searchParams.get('q') || '').trim().toLowerCase();
+
+  const where = [];
+  const args = [];
+
+  if (dateParam) {
+    if (!validDate(dateParam)) throw new ApiError(400, 'التاريخ غير صحيح');
+    where.push('expense_date = ?');
+    args.push(dateParam);
+  } else if (monthParam) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam)) throw new ApiError(400, 'الشهر غير صحيح');
+    const monthStart = `${monthParam}-01`;
+    const nextMonthStart = `${shiftMonthStr(monthParam, 1)}-01`;
+    where.push('expense_date >= ? AND expense_date < ?');
+    args.push(monthStart, nextMonthStart);
+  }
+
+  if (category && category !== 'all') {
+    where.push('category = ?');
+    args.push(category);
+  }
+
+  const sql = `SELECT * FROM expenses ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY expense_date DESC, id DESC LIMIT 500`;
+  let rows = db.prepare(sql).all(...args);
+  if (q) {
+    rows = rows.filter(
+      (r) =>
+        (r.title || '').toLowerCase().includes(q) ||
+        (r.category || '').toLowerCase().includes(q) ||
+        (r.notes || '').toLowerCase().includes(q) ||
+        (r.recorded_by || '').toLowerCase().includes(q)
+    );
+  }
+
+  const today = todayStr();
+  const curMonth = today.slice(0, 7);
+  const monthStart = `${curMonth}-01`;
+  const nextMonthStart = `${shiftMonthStr(curMonth, 1)}-01`;
+
+  const todayTotal = db.prepare('SELECT COALESCE(SUM(amount), 0) AS s FROM expenses WHERE expense_date = ?').get(today).s;
+  const monthTotal = db
+    .prepare('SELECT COALESCE(SUM(amount), 0) AS s FROM expenses WHERE expense_date >= ? AND expense_date < ?')
+    .get(monthStart, nextMonthStart).s;
+  const filteredTotal = rows.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+
+  return {
+    today,
+    currentMonth: curMonth,
+    todayTotal: Number(todayTotal) || 0,
+    monthTotal: Number(monthTotal) || 0,
+    filteredTotal,
+    count: rows.length,
+    list: rows.map((r) => ({ ...r, time: formatTimeInZone(r.created_at) })),
+  };
+});
+
+route('POST', '/api/expenses', 'staff', (ctx) => {
+  const b = ctx.body || {};
+  const title = cleanStr(b.title, 150, 'بيان المصروف', true);
+  const category = cleanStr(b.category, 60, 'التصنيف') || 'أخرى';
+  const amount = Number(toEnglishDigits(b.amount));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new ApiError(400, 'المبلغ يجب أن يكون رقم أكبر من صفر');
+  }
+  const expenseDate = cleanStr(b.expense_date, 20, 'تاريخ المصروف') || todayStr();
+  if (!validDate(expenseDate)) throw new ApiError(400, 'تاريخ المصروف غير صحيح');
+  const notes = cleanStr(b.notes, 300, 'الملاحظات');
+  const createdAt = new Date().toISOString();
+  const recordedBy = ctx.session.role === 'admin' ? 'admin' : 'staff';
+
+  const info = db
+    .prepare(
+      `INSERT INTO expenses (title, category, amount, expense_date, notes, recorded_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(title, category, amount, expenseDate, notes, recordedBy, createdAt);
+
+  const id = Number(info.lastInsertRowid);
+  logAudit('add_expense', ctx.session.role, `تسجيل مصروف: ${title} (${category}) بقيمة ${amount} ج.م بتاريخ ${expenseDate}`, ctx.ip);
+  const row = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id);
+  return { ...row, time: formatTimeInZone(row.created_at) };
 });
 
 // ---------- تقرير الوردية / التقرير اليومي للاشتراكات والتجديدات ----------
@@ -1082,11 +1202,20 @@ route('GET', '/api/reports/daily', 'admin', (ctx) => {
   }
   const recentHistory = Object.values(recentMap).sort((a, b) => b.date.localeCompare(a.date));
 
+  const expensesRows = db
+    .prepare(`SELECT id, title, category, amount, expense_date, notes, recorded_by, created_at FROM expenses WHERE expense_date = ? ORDER BY id DESC`)
+    .all(targetDate);
+  const totalExpenses = expensesRows.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+  const netRevenue = totalRevenue - totalExpenses;
+
   return {
     date: targetDate,
     today,
     gymName: GYM_NAME,
     totalRevenue,
+    totalExpenses,
+    expenseCount: expensesRows.length,
+    netRevenue,
     totalCount: newCount + renewCount,
     newCount,
     newRevenue,
@@ -1096,6 +1225,254 @@ route('GET', '/api/reports/daily', 'admin', (ctx) => {
     cancelledRevenue,
     attendanceCount,
     recentHistory,
+    expensesList: expensesRows.map((r) => ({ ...r, time: formatTimeInZone(r.created_at) })),
+    list,
+  };
+});
+
+// ---------- التقفيل الشهري للإيرادات (للمدير) ----------
+function shiftMonthStr(ym, delta) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+route('GET', '/api/reports/monthly', 'admin', (ctx) => {
+  const monthParam = ctx.url.searchParams.get('month');
+  const currentMonth = todayStr().slice(0, 7);
+  const targetMonth = monthParam ? String(monthParam).trim() : currentMonth;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(targetMonth)) {
+    throw new ApiError(400, 'الشهر غير صحيح');
+  }
+
+  const monthStart = `${targetMonth}-01`;
+  const nextMonthStart = `${shiftMonthStr(targetMonth, 1)}-01`;
+  const windowStart = addDays(monthStart, -1);
+  const windowEnd = addDays(nextMonthStart, 2);
+
+  const rawSubs = db
+    .prepare(
+      `SELECT s.id, s.member_id, s.plan_name, s.start_date, s.end_date, s.price, s.status, s.created_at,
+              m.name AS member_name, m.phone AS member_phone, m.code AS member_code,
+              (SELECT COUNT(*) FROM subscriptions s_prev
+               WHERE s_prev.member_id = s.member_id
+                 AND (s_prev.created_at < s.created_at OR (s_prev.created_at = s.created_at AND s_prev.id < s.id))
+              ) AS prev_subs_count
+       FROM subscriptions s
+       JOIN members m ON m.id = s.member_id
+       WHERE s.created_at >= ? AND s.created_at < ?
+       ORDER BY s.created_at DESC, s.id DESC`
+    )
+    .all(windowStart, windowEnd);
+
+  const rawPt = db
+    .prepare(
+      `SELECT p.id, p.member_id, p.trainer_name, p.package_name, p.start_date, p.end_date, p.price, p.paid, p.status, p.created_at,
+              m.name AS member_name, m.phone AS member_phone, m.code AS member_code
+       FROM private_trainings p
+       JOIN members m ON m.id = p.member_id
+       WHERE p.created_at >= ? AND p.created_at < ?
+       ORDER BY p.created_at DESC, p.id DESC`
+    )
+    .all(windowStart, windowEnd);
+
+  const list = [];
+  const dailyMap = {};
+  const planMap = {};
+  let subRevenue = 0;
+  let newCount = 0;
+  let newRevenue = 0;
+  let renewCount = 0;
+  let renewRevenue = 0;
+  let cancelledCount = 0;
+  let cancelledRevenue = 0;
+  let ptCount = 0;
+  let ptRevenue = 0;
+  let ptPaid = 0;
+
+  const ensureDay = (d) => {
+    if (!dailyMap[d]) dailyMap[d] = { date: d, subCount: 0, subRevenue: 0, ptCount: 0, ptRevenue: 0, totalRevenue: 0, expenses: 0, netRevenue: 0 };
+    return dailyMap[d];
+  };
+  const addPlanStat = (name, price) => {
+    if (!planMap[name]) planMap[name] = { name, count: 0, revenue: 0 };
+    planMap[name].count++;
+    planMap[name].revenue += price;
+  };
+
+  for (const row of rawSubs) {
+    const rowDate = new Date(row.created_at).toLocaleDateString('en-CA', { timeZone: TZ });
+    if (!rowDate.startsWith(targetMonth)) continue;
+
+    const isRenewal = row.prev_subs_count > 0;
+    const isCancelled = row.status === 'cancelled';
+    const price = Number(row.price) || 0;
+
+    if (isCancelled) {
+      cancelledCount++;
+      cancelledRevenue += price;
+    } else {
+      subRevenue += price;
+      if (isRenewal) {
+        renewCount++;
+        renewRevenue += price;
+      } else {
+        newCount++;
+        newRevenue += price;
+      }
+      const dObj = ensureDay(rowDate);
+      dObj.subCount++;
+      dObj.subRevenue += price;
+      dObj.totalRevenue += price;
+      addPlanStat(row.plan_name, price);
+    }
+
+    list.push({
+      kind: 'sub',
+      id: row.id,
+      member_id: row.member_id,
+      member_name: row.member_name,
+      member_phone: row.member_phone,
+      member_code: row.member_code,
+      plan_name: row.plan_name,
+      price,
+      date: rowDate,
+      time: formatTimeInZone(row.created_at),
+      status: row.status,
+      created_at: row.created_at,
+      type: isRenewal ? 'renew' : 'new',
+      type_label: isRenewal ? 'تجديد اشتراك' : 'اشتراك جديد',
+    });
+  }
+
+  for (const row of rawPt) {
+    const rowDate = new Date(row.created_at).toLocaleDateString('en-CA', { timeZone: TZ });
+    if (!rowDate.startsWith(targetMonth)) continue;
+    if (row.status === 'cancelled') continue;
+
+    const price = Number(row.price) || 0;
+    const paid = Number(row.paid) || 0;
+    ptCount++;
+    ptRevenue += price;
+    ptPaid += paid;
+
+    const dObj = ensureDay(rowDate);
+    dObj.ptCount++;
+    dObj.ptRevenue += price;
+    dObj.totalRevenue += price;
+    addPlanStat(`⭐ ${row.package_name}`, price);
+
+    list.push({
+      kind: 'pt',
+      id: row.id,
+      member_id: row.member_id,
+      member_name: row.member_name,
+      member_phone: row.member_phone,
+      member_code: row.member_code,
+      plan_name: `${row.package_name} (${row.trainer_name})`,
+      price,
+      date: rowDate,
+      time: formatTimeInZone(row.created_at),
+      status: row.status,
+      created_at: row.created_at,
+      type: 'pt',
+      type_label: 'برايفت (PT)',
+    });
+  }
+
+  list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+
+  const totalRevenue = subRevenue + ptRevenue;
+
+  const expensesRows = db
+    .prepare(`SELECT id, title, category, amount, expense_date, notes, recorded_by, created_at FROM expenses WHERE expense_date >= ? AND expense_date < ? ORDER BY expense_date DESC, id DESC`)
+    .all(monthStart, nextMonthStart);
+  let totalExpenses = 0;
+  for (const ex of expensesRows) {
+    const amt = Number(ex.amount) || 0;
+    totalExpenses += amt;
+    const dObj = ensureDay(ex.expense_date);
+    dObj.expenses += amt;
+  }
+  for (const dObj of Object.values(dailyMap)) {
+    dObj.netRevenue = dObj.totalRevenue - dObj.expenses;
+  }
+
+  const empStats = db.prepare(`SELECT COUNT(*) AS c, COALESCE(SUM(salary), 0) AS s FROM employees WHERE active = 1`).get();
+  const totalSalaries = Number(empStats.s) || 0;
+  const employeeCount = Number(empStats.c) || 0;
+  const netAfterExpenses = totalRevenue - totalExpenses;
+  const netAfterSalaries = netAfterExpenses - totalSalaries;
+
+  const attendanceCount = db
+    .prepare(`SELECT COUNT(*) AS c FROM attendance WHERE day >= ? AND day < ? AND result = 'ok'`)
+    .get(monthStart, nextMonthStart).c;
+
+  const dailyBreakdown = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
+  const planBreakdown = Object.values(planMap).sort((a, b) => b.revenue - a.revenue);
+
+  // ملخص آخر 12 شهر لسرعة التنقل
+  const recentMonthsMap = {};
+  for (let i = 0; i < 12; i++) {
+    const m = shiftMonthStr(currentMonth, -i);
+    recentMonthsMap[m] = { month: m, count: 0, revenue: 0, expenses: 0, netRevenue: 0 };
+  }
+  const oldestMonthStart = `${shiftMonthStr(currentMonth, -11)}-01`;
+  const oldestWindow = addDays(oldestMonthStart, -1);
+  for (const s of db.prepare(`SELECT price, status, created_at FROM subscriptions WHERE created_at >= ?`).all(oldestWindow)) {
+    if (s.status === 'cancelled') continue;
+    const m = new Date(s.created_at).toLocaleDateString('en-CA', { timeZone: TZ }).slice(0, 7);
+    if (recentMonthsMap[m]) {
+      recentMonthsMap[m].count++;
+      recentMonthsMap[m].revenue += Number(s.price) || 0;
+    }
+  }
+  for (const p of db.prepare(`SELECT price, status, created_at FROM private_trainings WHERE created_at >= ?`).all(oldestWindow)) {
+    if (p.status === 'cancelled') continue;
+    const m = new Date(p.created_at).toLocaleDateString('en-CA', { timeZone: TZ }).slice(0, 7);
+    if (recentMonthsMap[m]) {
+      recentMonthsMap[m].count++;
+      recentMonthsMap[m].revenue += Number(p.price) || 0;
+    }
+  }
+  for (const ex of db.prepare(`SELECT amount, expense_date FROM expenses WHERE expense_date >= ?`).all(oldestMonthStart)) {
+    const m = (ex.expense_date || '').slice(0, 7);
+    if (recentMonthsMap[m]) {
+      recentMonthsMap[m].expenses += Number(ex.amount) || 0;
+    }
+  }
+  for (const rm of Object.values(recentMonthsMap)) {
+    rm.netRevenue = rm.revenue - rm.expenses;
+  }
+  const recentMonths = Object.values(recentMonthsMap).sort((a, b) => b.month.localeCompare(a.month));
+
+  return {
+    month: targetMonth,
+    currentMonth,
+    gymName: GYM_NAME,
+    totalRevenue,
+    totalExpenses,
+    expenseCount: expensesRows.length,
+    netAfterExpenses,
+    subRevenue,
+    subCount: newCount + renewCount,
+    newCount,
+    newRevenue,
+    renewCount,
+    renewRevenue,
+    cancelledCount,
+    cancelledRevenue,
+    ptCount,
+    ptRevenue,
+    ptPaid,
+    totalSalaries,
+    employeeCount,
+    netAfterSalaries,
+    attendanceCount,
+    dailyBreakdown,
+    planBreakdown,
+    recentMonths,
+    expensesList: expensesRows.map((r) => ({ ...r, time: formatTimeInZone(r.created_at) })),
     list,
   };
 });
@@ -1383,13 +1760,284 @@ route('GET', '/api/backup/download', 'admin', () => {
 });
 
 // أخذ نسخة احتياطية وحفظها محلياً الآن
-route('POST', '/api/backup/now', 'admin', () => {
+route('POST', '/api/backup/now', 'admin', (ctx) => {
   const res = createLocalBackup('gym-backup');
+  logAudit('backup_created', ctx.session?.role || 'admin', `نسخة احتياطية فورية: ${res.filename}`, ctx.ip);
   return {
     ok: true,
     message: 'تم عمل نسخة احتياطية بنجاح وحفظها في البارتشن الآمن باسم تاريخ اليوم',
     ...res,
   };
+});
+
+// نسخة احتياطية شاملة (قاعدة البيانات كاملة + تقرير CSV شامل لكل الجداول)
+route('POST', '/api/backup/full', 'admin', (ctx) => {
+  const { execSync } = require('child_process');
+  try {
+    execSync(`"${process.execPath}" "${path.join(__dirname, 'scripts', 'full_backup.js')}"`, {
+      timeout: 60000,
+      cwd: __dirname,
+    });
+  } catch (e) {
+    console.error('[FullBackup Error]:', e.message);
+    throw new ApiError(500, 'فشل إنشاء النسخة الاحتياطية الشاملة: ' + e.message);
+  }
+  const REPORTS_DIR = path.join(DATA_DIR, 'reports');
+  const reports = fs.existsSync(REPORTS_DIR)
+    ? fs.readdirSync(REPORTS_DIR).filter((f) => f.endsWith('.csv')).sort().reverse().slice(0, 5)
+    : [];
+  logAudit('backup_created', ctx.session?.role || 'admin', `إنشاء نسخة احتياطية شاملة + تقرير CSV (${reports[0] || ''})`, ctx.ip);
+  return {
+    ok: true,
+    message: 'تم إنشاء النسخة الاحتياطية الشاملة + تقرير Excel/CSV بنجاح',
+    lastReports: reports,
+  };
+});
+
+// تحميل أحدث تقرير CSV شامل
+route('GET', '/api/backup/report', 'admin', () => {
+  const REPORTS_DIR = path.join(DATA_DIR, 'reports');
+  if (!fs.existsSync(REPORTS_DIR)) throw new ApiError(404, 'لا توجد تقارير محفوظة بعد');
+  const files = fs.readdirSync(REPORTS_DIR).filter((f) => f.endsWith('.csv')).sort().reverse();
+  if (!files.length) throw new ApiError(404, 'لا توجد تقارير محفوظة بعد — اضغط "نسخة شاملة + تقرير Excel" أولاً');
+  const content = fs.readFileSync(path.join(REPORTS_DIR, files[0]));
+  return {
+    raw: content,
+    type: 'text/csv; charset=utf-8',
+    headers: {
+      'Content-Disposition': `attachment; filename="${files[0]}"`,
+      'Content-Length': Buffer.byteLength(content),
+    },
+  };
+});
+
+// تصدير ملف PDF منظم يحتوي على جميع الأعضاء وبياناتهم
+function escHtml(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function findPdfBrowser() {
+  const candidates = [
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+route('GET', '/api/export/members.pdf', 'staff', (ctx) => {
+  const browserPath = findPdfBrowser();
+  if (!browserPath) {
+    throw new ApiError(500, 'تعذر العثور على Microsoft Edge أو Chrome لتوليد ملف PDF');
+  }
+
+  const gymName = getSetting('gym_name', 'Hulk Gym');
+  const today = todayStr();
+  const rows = db.prepare('SELECT * FROM members ORDER BY id ASC').all();
+  const list = rows.map((m) => {
+    const view = memberView(m, today);
+    const attCount = db.prepare("SELECT COUNT(*) AS c FROM attendance WHERE member_id = ? AND result = 'ok' AND COALESCE(archived, 0) = 0").get(m.id).c;
+    return { ...view, attCount };
+  });
+
+  const statusText = (m) => {
+    if (m.active === -1) return 'مؤرشف';
+    if (!m.active) return 'موقوف';
+    switch (m.sub.state) {
+      case 'active': return `نشط (${m.sub.days_left} يوم)`;
+      case 'expiring': return `قارب على الانتهاء (${m.sub.days_left} يوم)`;
+      case 'expired': return 'منتهي';
+      case 'upcoming': return 'لم يبدأ بعد';
+      default: return 'بدون اشتراك';
+    }
+  };
+
+  const statusColor = (m) => {
+    if (m.active === -1 || !m.active) return '#64748b';
+    switch (m.sub.state) {
+      case 'active': return '#16a34a';
+      case 'expiring': return '#d97706';
+      case 'expired': return '#dc2626';
+      default: return '#475569';
+    }
+  };
+
+  const activeCount = list.filter((m) => m.active === 1 && (m.sub.state === 'active' || m.sub.state === 'expiring')).length;
+  const expiredCount = list.filter((m) => m.active === 1 && m.sub.state === 'expired').length;
+  const archivedCount = list.filter((m) => m.active === -1).length;
+
+  const tableRowsHtml = list.map((m, i) => `
+    <tr>
+      <td class="center">${i + 1}</td>
+      <td class="mono center">${escHtml(m.code)}</td>
+      <td class="bold">${escHtml(m.name)}</td>
+      <td class="mono">${escHtml(m.phone || '—')}</td>
+      <td class="center">${m.age != null ? escHtml(m.age) : '—'}</td>
+      <td>${escHtml(m.sub.plan_name || '—')}</td>
+      <td class="mono center">${escHtml(m.sub.start_date || '—')}</td>
+      <td class="mono center">${escHtml(m.sub.end_date || '—')}</td>
+      <td class="center"><span class="badge" style="color:${statusColor(m)};border-color:${statusColor(m)}">${escHtml(statusText(m))}</span></td>
+      <td class="center">${m.attCount}</td>
+      <td class="notes">${escHtml((m.notes || '').replace(/\n/g, ' | ') || '—')}</td>
+    </tr>
+  `).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>تقرير الأعضاء - ${escHtml(gymName)}</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #0f172a; margin: 0; padding: 0; font-size: 11px; }
+  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #16a34a; padding-bottom: 10px; margin-bottom: 12px; }
+  .header h1 { margin: 0; font-size: 20px; color: #15803d; }
+  .header .meta { font-size: 11px; color: #475569; text-align: left; }
+  .stats { display: flex; gap: 12px; margin-bottom: 12px; }
+  .stat { flex: 1; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px; text-align: center; }
+  .stat b { display: block; font-size: 16px; color: #0f172a; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  th { background: #1e293b; color: #fff; padding: 7px 6px; text-align: right; font-size: 10.5px; border: 1px solid #334155; }
+  td { padding: 6px; border: 1px solid #cbd5e1; vertical-align: middle; font-size: 10.5px; }
+  tbody tr:nth-child(even) { background: #f8fafc; }
+  .center { text-align: center; }
+  .bold { font-weight: 700; }
+  .mono { font-family: Consolas, monospace; direction: ltr; unicode-bidi: embed; }
+  .notes { max-width: 170px; word-wrap: break-word; color: #334155; font-size: 9.5px; }
+  .badge { display: inline-block; padding: 2px 6px; border: 1px solid; border-radius: 4px; font-weight: 600; font-size: 9.5px; background: #fff; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>🏋️ سجل الأعضاء الشامل — ${escHtml(gymName)}</h1>
+      <div style="color:#475569;margin-top:3px;">قائمة منظمة بجميع الأعضاء المسجلين وبيانات اشتراكاتهم</div>
+    </div>
+    <div class="meta">
+      <div>تاريخ التقرير: <b>${escHtml(today)}</b></div>
+      <div>وقت الإصدار: ${escHtml(new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }))}</div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat">إجمالي الأعضاء<b>${list.length}</b></div>
+    <div class="stat">اشتراكات سارية<b style="color:#16a34a">${activeCount}</b></div>
+    <div class="stat">اشتراكات منتهية<b style="color:#dc2626">${expiredCount}</b></div>
+    <div class="stat">أعضاء مؤرشفون<b style="color:#64748b">${archivedCount}</b></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="center">#</th>
+        <th class="center">الكود</th>
+        <th>الاسم</th>
+        <th>الموبايل</th>
+        <th class="center">السن</th>
+        <th>الباقة الحالية</th>
+        <th class="center">تاريخ البدء</th>
+        <th class="center">تاريخ الانتهاء</th>
+        <th class="center">الحالة</th>
+        <th class="center">الحضور</th>
+        <th>الملاحظات</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRowsHtml || '<tr><td colspan="11" class="center">لا يوجد أعضاء مسجلون بعد.</td></tr>'}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const stamp = Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+  const tmpHtml = path.join(os.tmpdir(), `hulk-members-${stamp}.html`);
+  const tmpPdf = path.join(os.tmpdir(), `hulk-members-${stamp}.pdf`);
+  const tmpProfile = path.join(os.tmpdir(), `hulk-edge-${stamp}`);
+
+  try {
+    fs.writeFileSync(tmpHtml, html, 'utf8');
+    const fileUrl = 'file:///' + tmpHtml.replace(/\\/g, '/');
+    execFileSync(
+      browserPath,
+      [
+        '--headless=new',
+        '--disable-gpu',
+        '--no-sandbox',
+        `--user-data-dir=${tmpProfile}`,
+        '--no-pdf-header-footer',
+        `--print-to-pdf=${tmpPdf}`,
+        fileUrl,
+      ],
+      { timeout: 30000, windowsHide: true }
+    );
+    if (!fs.existsSync(tmpPdf)) {
+      throw new Error('لم يتم توليد ملف PDF');
+    }
+    const pdfBuf = fs.readFileSync(tmpPdf);
+    logAudit('export_members_pdf', ctx.session?.role || 'staff', `تصدير ملف PDF لعدد ${list.length} عضو`, ctx.ip);
+    return {
+      raw: pdfBuf,
+      type: 'application/pdf',
+      headers: {
+        'Content-Disposition': `attachment; filename="hulk-gym-members-${today}.pdf"`,
+        'Content-Length': Buffer.byteLength(pdfBuf),
+      },
+    };
+  } finally {
+    try { if (fs.existsSync(tmpHtml)) fs.unlinkSync(tmpHtml); } catch {}
+    try { if (fs.existsSync(tmpPdf)) fs.unlinkSync(tmpPdf); } catch {}
+    try { if (fs.existsSync(tmpProfile)) fs.rmSync(tmpProfile, { recursive: true, force: true }); } catch {}
+  }
+});
+
+// مراجعة شاملة لسجل العمليات (Audit Trail) مع بحث وفلاتر
+route('GET', '/api/audit/full', 'admin', (ctx) => {
+  const limit = Math.min(Math.max(parseInt(ctx.url.searchParams.get('limit') || '200', 10) || 200, 1), 2000);
+  const page = Math.max(parseInt(ctx.url.searchParams.get('page') || '1', 10) || 1, 1);
+  const offset = (page - 1) * limit;
+  const q = (ctx.url.searchParams.get('q') || '').trim();
+  const action = (ctx.url.searchParams.get('action') || '').trim();
+  const dateFrom = (ctx.url.searchParams.get('from') || '').trim();
+  const dateTo = (ctx.url.searchParams.get('to') || '').trim();
+
+  const where = [];
+  const params = [];
+  if (q) {
+    where.push('(details LIKE ? OR performed_by LIKE ? OR ip LIKE ?)');
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  }
+  if (action) {
+    where.push('action = ?');
+    params.push(action);
+  }
+  if (dateFrom) {
+    where.push('created_at >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    where.push('created_at <= ?');
+    params.push(dateTo + 'T23:59:59');
+  }
+
+  const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const total = db.prepare(`SELECT COUNT(*) AS c FROM audit_logs ${whereClause}`).get(...params).c;
+  const logs = db.prepare(`SELECT * FROM audit_logs ${whereClause} ORDER BY id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  const actions = db.prepare('SELECT DISTINCT action FROM audit_logs ORDER BY action').all().map((r) => r.action);
+
+  return { ok: true, total, page, limit, pages: Math.ceil(total / limit), actions, logs };
 });
 
 // تحديد وتخصيص مسار البارتشن الآمن للنسخ الاحتياطي
@@ -1662,7 +2310,7 @@ const CARD_PUBLIC_FILES = new Set([
   'style.css',   // التنسيق
   'login.html',  // صفحة تسجيل الدخول (لازم تكون متاحة)
   'login.js',    // سكريبت تسجيل الدخول
-  'xgym-logo.jpg', // شعار الجيم وخلفية الكارنيه
+  'hulkgym-logo.jpg', // شعار الجيم وخلفية الكارنيه
 ]);
 
 function serveStatic(req, res, pathname, session) {
@@ -1809,3 +2457,5 @@ if (require.main === module) {
 }
 
 module.exports = { server, doCheckin };
+
+
