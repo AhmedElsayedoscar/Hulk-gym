@@ -1845,12 +1845,12 @@ route('GET', '/api/export/members.pdf', 'staff', (ctx) => {
   const list = rows.map((m) => {
     const view = memberView(m, today);
     const attCount = db.prepare("SELECT COUNT(*) AS c FROM attendance WHERE member_id = ? AND result = 'ok' AND COALESCE(archived, 0) = 0").get(m.id).c;
-    return { ...view, attCount };
+    return { ...view, rawActive: m.active, attCount };
   });
 
   const statusText = (m) => {
-    if (m.active === -1) return 'مؤرشف';
-    if (!m.active) return 'موقوف';
+    if (m.rawActive === -1) return 'مؤرشف';
+    if (!m.rawActive) return 'موقوف';
     switch (m.sub.state) {
       case 'active': return `نشط (${m.sub.days_left} يوم)`;
       case 'expiring': return `قارب على الانتهاء (${m.sub.days_left} يوم)`;
@@ -1861,7 +1861,7 @@ route('GET', '/api/export/members.pdf', 'staff', (ctx) => {
   };
 
   const statusColor = (m) => {
-    if (m.active === -1 || !m.active) return '#64748b';
+    if (m.rawActive === -1 || !m.rawActive) return '#64748b';
     switch (m.sub.state) {
       case 'active': return '#16a34a';
       case 'expiring': return '#d97706';
@@ -1870,9 +1870,9 @@ route('GET', '/api/export/members.pdf', 'staff', (ctx) => {
     }
   };
 
-  const activeCount = list.filter((m) => m.active === 1 && (m.sub.state === 'active' || m.sub.state === 'expiring')).length;
-  const expiredCount = list.filter((m) => m.active === 1 && m.sub.state === 'expired').length;
-  const archivedCount = list.filter((m) => m.active === -1).length;
+  const activeCount = list.filter((m) => m.rawActive === 1 && (m.sub.state === 'active' || m.sub.state === 'expiring')).length;
+  const expiredCount = list.filter((m) => m.rawActive === 1 && m.sub.state === 'expired').length;
+  const archivedCount = list.filter((m) => m.rawActive === -1).length;
 
   const tableRowsHtml = list.map((m, i) => `
     <tr>

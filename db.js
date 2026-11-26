@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
@@ -142,6 +142,12 @@ function initDbSchema(conn) {
     conn.exec('ALTER TABLE members ADD COLUMN age INTEGER');
   } catch {
     /* Ø§Ù„Ø¹Ù…ÙˆØ¯ Ù…ÙˆØ¬ÙˆØ¯ Ø¨Ø§Ù„ÙØ¹Ù„ */
+  }
+
+  try {
+    conn.exec('ALTER TABLE attendance ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+  } catch {
+    /* العمود موجود بالفعل */
   }
 
   const setIns = conn.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
